@@ -29,24 +29,59 @@ It also exports logs to Excel for a date range and deletes logs older than a cho
 
 ```
 packages/shared   types, zod schemas, sync protocol, UUIDv7, ranks, seconds parser
-apps/server       hexagonal API (Phase B)
+apps/server       hexagonal API
+  src/domain        errors (no framework imports)
+  src/ports         interfaces: repositories, unit of work, clock, hasher, tokens, notifier
+  src/application   use cases: SignUp/SignIn/SignOut/Authenticate, PushChanges (one handler per op), PullChanges, Cleanup
+  src/adapters      sqlite (node:sqlite + SQL migrations), crypto (Argon2id, tokens), http (Hono), realtime (SSE hub)
+  src/container.ts  composition root: the only file that knows concrete classes
+  test/             use-case tests on in-memory SQLite with a fake clock
+tests/blackbox    HTTP-only tests against a spawned server process (works for any implementation)
 apps/web          React PWA (Phase C)
 ```
 
 ## Commands
 
 ```bash
-npm install          # once
-npm run check        # typecheck + all tests
-npm test             # tests only
-npm start -w @pm/server
+npm install                 # once
+npm run check               # typecheck + all tests
+npm test                    # tests only
+npm start -w @pm/server     # run the server (data in ./apps/server/data)
+SERVER_CMD="python server.py" npx vitest run tests   # check another implementation
 ```
 
-Requires Node ≥ 24. The server runs TypeScript natively (no build step), so imports use `.ts` extensions.
+Requires Node ≥ 24. The server runs TypeScript natively (no build step), so imports use `.ts` extensions, and constructor parameter properties are not used.
+
+## Server configuration (environment variables)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `HOST` | `127.0.0.1` | Bind address. Localhost only; Tailscale `serve` forwards to it |
+| `PORT` | `3000` | `0` picks a free port |
+| `DATA_DIR` | `./data` | Holds `personal-manager.db` |
+| `ALLOW_SIGNUP` | `true` | Set `false` once your account exists |
+| `SESSION_TTL_DAYS` | `90` | Sliding login lifetime per device |
+| `AUTH_RATE_LIMIT_MAX` / `_WINDOW_MS` | `10` / `60000` | Sign-in attempts per username per window |
+| `SSE_HEARTBEAT_MS` | `25000` | Keep-alive ping on the event stream |
+
+## API
+
+All endpoints are under `/api`. Errors look like `{ "error": "<code>", "message": "..." }`.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/health` | – | Liveness |
+| POST | `/auth/signup` | – | `{username, password}` → `201 {token, user}` |
+| POST | `/auth/signin` | – | `{username, password}` → `{token, user}` |
+| POST | `/auth/signout` | Bearer | Revoke this device's token |
+| GET | `/me` | Bearer | Current user |
+| POST | `/sync/push` | Bearer | `{changes: Change[]}` → per-change `applied` / `ignored` |
+| GET | `/sync/pull?cursor=N` | Bearer | Changes after N (incremental or snapshot, paged) |
+| GET | `/sync/events` | Bearer | SSE: `changed` events with the latest cursor |
 
 ## Build plan
 
 - [x] **Phase A: Foundation.** 0 skeleton · 1 shared package
-- [ ] **Phase B: Server.** 2 core · 3 SQLite · 4 auth and isolation · 5 sync API · 6 SSE · 7 black-box tests
+- [x] **Phase B: Server.** 2 core · 3 SQLite · 4 auth and isolation · 5 sync API · 6 SSE · 7 black-box tests
 - [ ] **Phase C: PWA.** 8 shell · 9 local store · 10 SyncEngine · 11 TASKS · 12 PRIORITY · 13 LOG · 14 export and purge
 - [ ] **Phase D: Run it.** 15 deploy on the Mac (launchd, Tailscale, backups) · 16 install on devices and do the end-to-end check

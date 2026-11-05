@@ -48,6 +48,8 @@ export const ChangeSchema = z.discriminatedUnion("op", [
 ]);
 export type Change = z.infer<typeof ChangeSchema>;
 export type ChangeOp = Change["op"];
+/** A change before it gets its changeId (distributes over the union). */
+export type NewChange = Change extends infer C ? (C extends Change ? Omit<C, "changeId"> : never) : never;
 
 export const PushRequestSchema = z.strictObject({
   changes: z.array(ChangeSchema).min(1).max(SYNC_LIMITS.maxPushChanges),

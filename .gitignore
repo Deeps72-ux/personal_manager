@@ -4,6 +4,7 @@ dist/
 .DS_Store
 
 # local SQLite database + backups (never commit user data)
+data/
 *.db
 *.db-wal
 *.db-shm

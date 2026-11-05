@@ -1,7 +1,14 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/shared" },
-    { "path": "apps/server" }
+    {
+      "path": "packages/shared"
+    },
+    {
+      "path": "apps/server"
+    },
+    {
+      "path": "tests/blackbox"
+    }
   ]
 }
