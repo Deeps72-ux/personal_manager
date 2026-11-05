@@ -1,0 +1,10 @@
+{
+  "name": "@pm/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "React PWA (TASKS / PRIORITY / LOG). Set up in Phase C, step 8.",
+  "dependencies": {
+    "@pm/shared": "*"
+  }
+}

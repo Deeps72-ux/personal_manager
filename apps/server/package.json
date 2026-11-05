@@ -1,0 +1,13 @@
+{
+  "name": "@pm/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Sync + auth API. Runs on the Mac, stores data in SQLite. Hexagonal architecture.",
+  "scripts": {
+    "start": "node src/main.ts"
+  },
+  "dependencies": {
+    "@pm/shared": "*"
+  }
+}
