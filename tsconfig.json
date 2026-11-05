@@ -5,7 +5,13 @@
       "path": "packages/shared"
     },
     {
+      "path": "packages/test-server"
+    },
+    {
       "path": "apps/server"
+    },
+    {
+      "path": "apps/web"
     },
     {
       "path": "tests/blackbox"

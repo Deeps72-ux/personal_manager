@@ -14,7 +14,11 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run typecheck && npm run test"
+    "check": "npm run typecheck && npm run test",
+    "dev:server": "npm start -w @pm/server",
+    "dev:web": "npm run dev -w @pm/web",
+    "build": "npm run build -w @pm/web",
+    "icons": "node apps/web/scripts/generate-icons.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

@@ -3,9 +3,23 @@
   "compilerOptions": {
     "rootDir": ".",
     "outDir": "dist",
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "noUncheckedIndexedAccess": false
   },
-  "include": ["."],
-  "references": [{ "path": "../../packages/shared" }]
+  "include": [
+    "."
+  ],
+  "references": [
+    {
+      "path": "../../packages/shared"
+    },
+    {
+      "path": "../../packages/test-server"
+    }
+  ],
+  "exclude": [
+    "dist"
+  ]
 }

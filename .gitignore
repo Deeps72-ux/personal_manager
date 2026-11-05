@@ -14,3 +14,7 @@ backups/
 .env
 .env.*
 !.env.example
+
+# web build output
+.tsbuild/
+dev-dist/

@@ -1,0 +1,10 @@
+{
+  "name": "@pm/test-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Test helper: start the server as a separate process (black-box harness).",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

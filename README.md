@@ -36,8 +36,14 @@ apps/server       hexagonal API
   src/adapters      sqlite (node:sqlite + SQL migrations), crypto (Argon2id, tokens), http (Hono), realtime (SSE hub)
   src/container.ts  composition root: the only file that knows concrete classes
   test/             use-case tests on in-memory SQLite with a fake clock
+packages/test-server  starts the server as a separate process for tests
 tests/blackbox    HTTP-only tests against a spawned server process (works for any implementation)
-apps/web          React PWA (Phase C)
+apps/web          offline-first React PWA, hexagonal too
+  src/core          ports + use cases: TaskActions, PriorityActions, LogActions, AuthService, SyncEngine, ExportLogs
+  src/adapters      Dexie (IndexedDB), in-memory store, HTTP API, SSE over fetch, Excel writer
+  src/ui            React screens: TASKS · PRIORITY (dnd-kit) · LOG (calendar → day sheet)
+  src/main.tsx      composition root
+  test/             store contract (memory + IndexedDB), actions, SyncEngine vs real server, Excel, UI flows (jsdom)
 ```
 
 ## Commands
@@ -45,10 +51,14 @@ apps/web          React PWA (Phase C)
 ```bash
 npm install                 # once
 npm run check               # typecheck + all tests
-npm test                    # tests only
-npm start -w @pm/server     # run the server (data in ./apps/server/data)
+npm run dev:server          # API on 127.0.0.1:3000 (data in ./apps/server/data)
+npm run dev:web             # PWA on http://localhost:5173 (proxies /api to :3000)
+npm run build               # production PWA → apps/web/dist
+npm run icons               # regenerate PWA icons
 SERVER_CMD="python server.py" npx vitest run tests   # check another implementation
 ```
+
+If port 5173 is taken: `npm run dev -w @pm/web -- --port 5180`.
 
 Requires Node ≥ 24. The server runs TypeScript natively (no build step), so imports use `.ts` extensions, and constructor parameter properties are not used.
 
@@ -83,5 +93,5 @@ All endpoints are under `/api`. Errors look like `{ "error": "<code>", "message"
 
 - [x] **Phase A: Foundation.** 0 skeleton · 1 shared package
 - [x] **Phase B: Server.** 2 core · 3 SQLite · 4 auth and isolation · 5 sync API · 6 SSE · 7 black-box tests
-- [ ] **Phase C: PWA.** 8 shell · 9 local store · 10 SyncEngine · 11 TASKS · 12 PRIORITY · 13 LOG · 14 export and purge
+- [x] **Phase C: PWA.** 8 shell · 9 local store · 10 SyncEngine · 11 TASKS · 12 PRIORITY · 13 LOG · 14 export and purge
 - [ ] **Phase D: Run it.** 15 deploy on the Mac (launchd, Tailscale, backups) · 16 install on devices and do the end-to-end check

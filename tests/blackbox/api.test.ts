@@ -4,7 +4,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Api, Device, uniqueUsername } from "./client.ts";
-import { startServer, type RunningServer } from "./harness.ts";
+import { startServer, type RunningServer } from "@pm/test-server";
 
 let server: RunningServer;
 beforeAll(async () => {
