@@ -10,22 +10,18 @@ const display = () => {
   return el && !el.hidden ? el : null;
 };
 const button = () => screen.getByRole("button", { name: "Timer" });
-const advance = (ms: number) => act(() => vi.advanceTimersByTime(ms));
-
-function setVisibility(state: "visible" | "hidden") {
-  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
-  act(() => void document.dispatchEvent(new Event("visibilitychange")));
-}
+const wait = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
+const enter = () => fireEvent.pointerEnter(button());
+const leave = () => fireEvent.pointerLeave(button());
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "setInterval"] });
   vi.setSystemTime(T0);
 });
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
   localStorage.clear();
-  setVisibility("visible");
 });
 
 describe("formatElapsed", () => {
@@ -38,50 +34,60 @@ describe("formatElapsed", () => {
 });
 
 describe("TimerView", () => {
-  it("shows only an unlabelled button until tapped, then a live HH:MM:SS above it", () => {
+  it("is just an unlabelled button: no text on screen until hover/touch", () => {
     render(<TimerView />);
     expect(button().textContent).toBe("");
     expect(document.querySelector(".timer")?.textContent).toBe("");
     expect(display()).toBeNull();
-
-    advance(65_000);
-    fireEvent.click(button());
-    expect(display()?.textContent).toBe("00:01:05");
-    expect(display()?.nextElementSibling).toBe(button()); // time sits above the button
-    advance(2_000);
-    expect(display()?.textContent).toBe("00:01:07");
-
-    fireEvent.click(button()); // hide again; the count keeps going underneath
-    expect(display()).toBeNull();
   });
 
-  it("leaving the screen hides the time and restarts the count from that moment", () => {
-    const first = render(<TimerView />);
-    advance(10_000);
-    fireEvent.click(button());
-    expect(display()?.textContent).toBe("00:00:10");
-
-    first.unmount(); // switched to another tab
-    expect(readTimerStart()).toBe(T0 + 10_000);
-
-    advance(90_000); // away for 1m30s
+  it("hover/touch shows ONE fixed time above the button; it does not tick", () => {
+    localStorage.setItem("pm.timer.startedAt", String(T0 - 65_000));
     render(<TimerView />);
+    enter();
+    expect(display()?.textContent).toBe("00:01:05");
+    expect(display()?.nextElementSibling).toBe(button()); // above the button
+    wait(5_000); // still holding
+    expect(display()?.textContent).toBe("00:01:05");
+  });
+
+  it("leaving hides the time and restarts the count from 0 at that moment", () => {
+    render(<TimerView />);
+    enter();
+    wait(4_000);
+    leave();
     expect(display()).toBeNull();
-    fireEvent.click(button());
+    expect(readTimerStart()).toBe(T0 + 4_000);
+
+    wait(90_000);
+    enter();
     expect(display()?.textContent).toBe("00:01:30");
   });
 
-  it("the app going to the background also counts as leaving", () => {
+  it("a cancelled touch (e.g. the OS takes over) also counts as leaving", () => {
     render(<TimerView />);
-    advance(5_000);
-    fireEvent.click(button());
-
-    setVisibility("hidden");
+    enter();
+    wait(1_000);
+    fireEvent.pointerCancel(button());
     expect(display()).toBeNull();
-    advance(3_000);
-    setVisibility("visible");
+    expect(readTimerStart()).toBe(T0 + 1_000);
+  });
 
-    fireEvent.click(button());
+  it("switching tabs or blurring without a hover does not reset the count", () => {
+    localStorage.setItem("pm.timer.startedAt", String(T0 - 10_000));
+    const view = render(<TimerView />);
+    fireEvent.blur(button());
+    view.unmount();
+    expect(readTimerStart()).toBe(T0 - 10_000);
+  });
+
+  it("keyboard: hold Space to see the time, release to reset", () => {
+    localStorage.setItem("pm.timer.startedAt", String(T0 - 3_000));
+    render(<TimerView />);
+    fireEvent.keyDown(button(), { key: " " });
     expect(display()?.textContent).toBe("00:00:03");
+    fireEvent.keyUp(button(), { key: " " });
+    expect(display()).toBeNull();
+    expect(readTimerStart()).toBe(T0);
   });
 });

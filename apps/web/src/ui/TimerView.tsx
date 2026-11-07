@@ -1,62 +1,64 @@
-import { useEffect, useState } from "react";
+import { useRef, useState, type KeyboardEvent } from "react";
 import { formatElapsed, readTimerStart, saveTimerStart } from "./timer-store.ts";
 
 /**
- * TIMER: shows only a round button. Tapping it reveals the time since you last
- * left this screen. Leaving (another tab, or the app goes to the background)
- * hides the time and restarts the count from that moment.
+ * TIMER: one round button in the middle of an empty screen.
+ *
+ * Hover (mouse) or touch-and-hold (finger) shows ONE fixed time above the
+ * button: how long since the last hover/touch ended. It does not tick.
+ * When the pointer leaves or the finger lifts, the time hides and the count
+ * restarts from 0 at that moment.
  */
 export function TimerView() {
-  const [startedAt, setStartedAt] = useState<number>(() => {
-    const saved = readTimerStart();
-    if (saved !== null) return saved;
-    const now = Date.now(); // first ever visit: start counting now
-    saveTimerStart(now);
-    return now;
-  });
-  const [shown, setShown] = useState(false);
-  const [now, setNow] = useState(Date.now);
+  const [shown, setShown] = useState<string | null>(null);
+  const revealed = useRef(false);
 
-  // Redraw once a second, only while the time is on screen.
-  useEffect(() => {
-    if (!shown) return;
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [shown]);
+  const reveal = () => {
+    const now = Date.now();
+    let startedAt = readTimerStart();
+    if (startedAt === null) {
+      startedAt = now; // first ever use: nothing to measure yet
+      saveTimerStart(now);
+    }
+    revealed.current = true;
+    setShown(formatElapsed(now - startedAt));
+  };
 
-  // Leaving = switching tab (unmount) or the app/page going to the background.
-  useEffect(() => {
-    const leave = () => {
-      const t = Date.now();
-      saveTimerStart(t);
-      setStartedAt(t);
-      setShown(false);
-    };
-    const onVisibility = () => {
-      if (document.visibilityState === "hidden") leave();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      saveTimerStart(Date.now());
-    };
-  }, []);
+  const release = () => {
+    if (!revealed.current) return; // only a real reveal resets the count
+    revealed.current = false;
+    saveTimerStart(Date.now());
+    setShown(null);
+  };
 
-  // No visible text: the time sits above the button (above the thumb) and
-  // its slot is always reserved, so the button never jumps when it appears.
+  const onKey = (e: KeyboardEvent, down: boolean) => {
+    if (e.key !== " " && e.key !== "Enter") return;
+    e.preventDefault();
+    if (down && !e.repeat) reveal();
+    if (!down) release();
+  };
+
+  // No visible text: the time slot above the button is always reserved, so
+  // the button stays exactly centred whether the time is showing or not.
   return (
     <section className="view timer">
-      <output className="timer-display" aria-label="Time since you last left" hidden={!shown}>
-        {shown ? formatElapsed(now - startedAt) : ""}
+      <output className="timer-display" aria-label="Time since last check" hidden={shown === null}>
+        {shown ?? ""}
       </output>
       <button
         type="button"
         className="timer-button"
         aria-label="Timer"
-        aria-pressed={shown}
-        onClick={() => setShown(!shown)}
+        aria-pressed={shown !== null}
+        onPointerEnter={reveal}
+        onPointerLeave={release}
+        onPointerCancel={release}
+        onKeyDown={(e) => onKey(e, true)}
+        onKeyUp={(e) => onKey(e, false)}
+        onBlur={release}
+        onContextMenu={(e) => e.preventDefault()}
       />
+      <span className="timer-spacer" aria-hidden="true" />
     </section>
   );
 }
