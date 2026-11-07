@@ -14,6 +14,8 @@ const EnvSchema = z.object({
   AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1).default(60_000),
   SSE_HEARTBEAT_MS: z.coerce.number().int().min(10).default(25_000),
   CLEANUP_INTERVAL_MS: z.coerce.number().int().min(1000).default(6 * 60 * 60 * 1000),
+  WEB_DIR: z.string().optional(), // built PWA to serve at "/" (production)
+  ACCESS_LOG: bool.default(false),
 });
 
 export interface Config {
@@ -28,6 +30,8 @@ export interface Config {
   changeLogRetentionDays: number;
   pullPageSize: number;
   maxBodyBytes: number;
+  webDir: string | null;
+  accessLog: boolean;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -44,5 +48,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     changeLogRetentionDays: SYNC_LIMITS.changeLogRetentionDays,
     pullPageSize: SYNC_LIMITS.maxPullChanges,
     maxBodyBytes: 4 * 1024 * 1024,
+    webDir: e.WEB_DIR ? resolve(e.WEB_DIR) : null,
+    accessLog: e.ACCESS_LOG,
   };
 }

@@ -172,6 +172,25 @@ describe("PWA UI", () => {
     expect(await services.store.listLogsBetween("2000-01-01", "2100-01-01")).toEqual([]);
   });
 
+  it("appearance switch: per device, remembered, System clears it", async () => {
+    const { user } = renderApp();
+    await signUp(user);
+    await user.click(screen.getByRole("button", { name: "Account" }));
+    const group = within(screen.getByRole("group", { name: "Appearance" }));
+    expect(group.getByRole("button", { name: "System" }).getAttribute("aria-pressed")).toBe("true");
+
+    await user.click(group.getByRole("button", { name: "Dark" }));
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(localStorage.getItem("pm.theme")).toBe("dark");
+
+    await user.click(group.getByRole("button", { name: "Light" }));
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+
+    await user.click(group.getByRole("button", { name: "System" }));
+    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+    expect(localStorage.getItem("pm.theme")).toBeNull();
+  });
+
   it("sign out warns when changes are not yet synced", async () => {
     const { user, services } = renderApp();
     await signUp(user);

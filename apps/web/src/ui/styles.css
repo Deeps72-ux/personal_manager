@@ -24,8 +24,30 @@
   -webkit-text-size-adjust: 100%;
 }
 
+/* Dark: when the device is dark (unless forced light on this device),
+   or when forced dark on this device. Same tokens in both blocks. */
+:root[data-theme="dark"] {
+  --bg: #0f1016;
+  --surface: #181a23;
+  --surface-2: #20222e;
+  --text: #eceef6;
+  --muted: #9a9fb5;
+  --border: #2b2e3d;
+  --primary: #818cf8;
+  --primary-ink: #11121a;
+  --primary-soft: #23264a;
+  --danger: #f87171;
+  --success: #4ade80;
+  --warn: #fbbf24;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 14px rgb(0 0 0 / 0.35);
+  --shadow-lift: 0 12px 34px rgb(0 0 0 / 0.55);
+  --card-l: 17%;
+  --card-accent-l: 66%;
+  color-scheme: dark;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0f1016;
     --surface: #181a23;
     --surface-2: #20222e;
@@ -278,10 +300,25 @@ textarea {
   background: transparent;
   padding: 0.45rem;
 }
-.segmented button[aria-selected="true"] {
+.segmented button[aria-selected="true"],
+.segmented button[aria-pressed="true"] {
   background: var(--surface);
   box-shadow: var(--shadow);
   font-weight: 600;
+}
+.segmented.three {
+  grid-template-columns: repeat(3, 1fr);
+}
+.segmented.three button {
+  font-size: 0.85rem;
+  padding: 0.35rem;
+}
+.menu-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 /* ───────────── shell ───────────── */
@@ -780,4 +817,51 @@ textarea {
   * {
     transition: none !important;
   }
+}
+
+/* TIMER: empty screen, one round button in the thumb zone, time just above it */
+.timer {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 1.75rem;
+  min-height: calc(100dvh - 11rem);
+  padding-bottom: 2.5rem;
+}
+.timer-display {
+  display: block;
+  min-height: 1.2em; /* reserved even when hidden: the button stays put */
+  font-size: clamp(2.75rem, 13vw, 4.5rem);
+  font-weight: 600;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.timer-display[hidden] {
+  visibility: hidden;
+}
+.timer-button {
+  width: 8.5rem;
+  height: 8.5rem;
+  padding: 0;
+  border-radius: 50%;
+  border: none;
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--primary) 70%, #fff), var(--primary) 70%);
+  box-shadow:
+    0 10px 24px color-mix(in srgb, var(--primary) 35%, transparent),
+    inset 0 -4px 10px rgb(0 0 0 / 0.18);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.timer-button:active {
+  transform: scale(0.94);
+  box-shadow:
+    0 4px 10px color-mix(in srgb, var(--primary) 30%, transparent),
+    inset 0 -2px 6px rgb(0 0 0 / 0.2);
+}
+.timer-button[aria-pressed="true"] {
+  outline: 4px solid color-mix(in srgb, var(--primary) 30%, transparent);
+  outline-offset: 6px;
 }

@@ -18,7 +18,11 @@
     "dev:server": "npm start -w @pm/server",
     "dev:web": "npm run dev -w @pm/web",
     "build": "npm run build -w @pm/web",
-    "icons": "node apps/web/scripts/generate-icons.mjs"
+    "icons": "node apps/web/scripts/generate-icons.mjs",
+    "release": "node deploy/build-release.mjs",
+    "deploy": "deploy/install.sh",
+    "deploy:status": "deploy/status.sh",
+    "test:release": "node deploy/build-release.mjs && SERVER_CMD=\"node release/server.mjs\" vitest run tests/blackbox"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

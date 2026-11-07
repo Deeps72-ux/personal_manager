@@ -14,7 +14,11 @@ import { ExportLogs } from "./core/export-logs.ts";
 import { SyncEngine } from "./core/sync-engine.ts";
 import { App } from "./ui/App.tsx";
 import { ServicesProvider, type Services } from "./ui/services.tsx";
+import { applyTheme, readTheme } from "./ui/theme.ts";
 import "./ui/styles.css";
+
+// Apply this device's saved appearance before the first render (no flash).
+applyTheme(readTheme());
 
 const BASE_URL = ""; // same origin: the Mac server serves both the app and /api
 

@@ -54,6 +54,8 @@ export function buildContainer(config: Config, overrides: Overrides = {}) {
     authLimiter: new RateLimiter({ ...config.authRateLimit, clock }),
     sseHeartbeatMs: config.sseHeartbeatMs,
     maxBodyBytes: config.maxBodyBytes,
+    webDir: config.webDir,
+    accessLog: config.accessLog,
   });
 
   return { app, db, hub, uow, useCases, close: () => db.close() };

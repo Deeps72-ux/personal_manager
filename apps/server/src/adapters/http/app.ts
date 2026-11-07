@@ -26,6 +26,7 @@ import type { PullChanges } from "../../application/sync/pull-changes.ts";
 import type { PushChanges } from "../../application/sync/push-changes.ts";
 import type { ChangeHub } from "../realtime/change-hub.ts";
 import type { RateLimiter } from "./rate-limiter.ts";
+import { staticFiles } from "./static-files.ts";
 
 export interface HttpDeps {
   signUp: SignUp;
@@ -39,6 +40,10 @@ export interface HttpDeps {
   authLimiter: RateLimiter;
   sseHeartbeatMs: number;
   maxBodyBytes: number;
+  /** Directory of the built PWA to serve at "/" (omit in development). */
+  webDir?: string | null;
+  /** Log one line per API request with its duration. */
+  accessLog?: boolean;
 }
 
 type Env = { Variables: { user: User; token: string } };
@@ -76,6 +81,19 @@ export function createHttpApp(deps: HttpDeps) {
   const app = new Hono<Env>();
 
   app.use("*", secureHeaders());
+
+  // Access log: one line per API call with its duration (no bodies, no tokens).
+  if (deps.accessLog) {
+    app.use("/api/*", async (c, next) => {
+      if (c.req.path === "/api/health") return next();
+      const t0 = performance.now();
+      await next();
+      const ms = (performance.now() - t0).toFixed(1);
+      const ip = getConnInfo(c).remote.address ?? "-";
+      const via = c.req.header("tailscale-user-login") ? " ts" : "";
+      console.log(`${new Date().toISOString()} ${c.req.method} ${c.req.path} ${c.res.status} ${ms}ms ${ip}${via}`);
+    });
+  }
   app.use(
     "/api/*",
     bodyLimit({ maxSize: deps.maxBodyBytes, onError: (c) => fail(c, "payload_too_large", "request body too large") }),
@@ -157,6 +175,9 @@ export function createHttpApp(deps: HttpDeps) {
   });
 
   app.all("/api/*", (c) => fail(c, "not_found", "no such endpoint"));
+
+  // The PWA itself (production): everything that is not /api.
+  if (deps.webDir) app.get("*", staticFiles(deps.webDir));
 
   return app;
 }

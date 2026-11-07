@@ -62,3 +62,10 @@ export const ChevronRight = () => (
     <path d="M9 18l6-6-6-6" />
   </svg>
 );
+
+export const TimerIcon = () => (
+  <svg {...props}>
+    <circle cx="12" cy="13" r="8" />
+    <path d="M12 9v4l2.5 2.5M9.5 2h5" />
+  </svg>
+);

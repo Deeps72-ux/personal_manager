@@ -62,7 +62,7 @@ export class HttpRemoteApi implements RemoteApi {
         method,
         headers,
         body: body === undefined ? null : JSON.stringify(body),
-        signal: AbortSignal.timeout(this.opts.timeoutMs ?? 20_000),
+        signal: AbortSignal.timeout(this.opts.timeoutMs ?? 8_000),
       });
     } catch (err) {
       throw new NetworkError(err instanceof Error ? err.message : "network error");

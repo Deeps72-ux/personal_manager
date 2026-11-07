@@ -1,28 +1,22 @@
 import { useEffect, useState } from "react";
 import type { User } from "@pm/shared";
 import { AuthScreen } from "./AuthScreen.tsx";
-import { CalendarIcon, ListIcon, StackIcon } from "./icons.tsx";
-import { LogView } from "./LogView.tsx";
-import { PriorityView } from "./PriorityView.tsx";
+import { activeFeatures, resolveFeatureId } from "./features.tsx";
 import { useLive, useServices } from "./services.tsx";
 import { SyncBadge } from "./SyncBadge.tsx";
-import { TasksView } from "./TasksView.tsx";
+import { useTheme, type ThemeChoice } from "./theme.ts";
 
-type Tab = "tasks" | "priority" | "log";
-const TABS: { id: Tab; label: string; Icon: () => React.JSX.Element }[] = [
-  { id: "tasks", label: "Tasks", Icon: ListIcon },
-  { id: "priority", label: "Priority", Icon: StackIcon },
-  { id: "log", label: "Log", Icon: CalendarIcon },
-];
+const FEATURE_LIST = activeFeatures();
 
 const TAB_KEY = "pm.tab";
-const readTab = (): Tab => {
+const readTab = (): string => {
+  let saved: string | null = null;
   try {
-    const t = localStorage.getItem(TAB_KEY);
-    return t === "tasks" || t === "priority" || t === "log" ? t : "priority";
+    saved = localStorage.getItem(TAB_KEY);
   } catch {
-    return "priority";
+    // private mode: fall back to the default
   }
+  return resolveFeatureId(saved, FEATURE_LIST);
 };
 
 export function App() {
@@ -56,8 +50,9 @@ export function App() {
 }
 
 function Shell({ user }: { user: User }) {
-  const [tab, setTab] = useState<Tab>(readTab);
-  const choose = (t: Tab) => {
+  const [tab, setTab] = useState<string>(readTab);
+  const choose = (t: string) => {
+    if (!FEATURE_LIST.some((f) => f.id === t)) return;
     setTab(t);
     try {
       localStorage.setItem(TAB_KEY, t);
@@ -74,7 +69,7 @@ function Shell({ user }: { user: User }) {
           <span>Personal Manager</span>
         </div>
         <nav className="tabs tabs-top" aria-label="Sections">
-          {TABS.map(({ id, label }) => (
+          {FEATURE_LIST.map(({ id, label }) => (
             <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id} onClick={() => choose(id)}>
               {label}
             </button>
@@ -87,19 +82,40 @@ function Shell({ user }: { user: User }) {
       </header>
 
       <main className="content">
-        {tab === "tasks" && <TasksView />}
-        {tab === "priority" && <PriorityView onGoToTasks={() => choose("tasks")} />}
-        {tab === "log" && <LogView />}
+        {FEATURE_LIST.map(({ id, View }) => id === tab && <View key={id} navigate={choose} />)}
       </main>
 
       <nav className="tabs tabs-bottom" aria-label="Sections">
-        {TABS.map(({ id, label, Icon }) => (
+        {FEATURE_LIST.map(({ id, label, Icon }) => (
           <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id} onClick={() => choose(id)}>
             <Icon />
             <span>{label}</span>
           </button>
         ))}
       </nav>
+    </div>
+  );
+}
+
+const THEMES: { id: ThemeChoice; label: string }[] = [
+  { id: "system", label: "System" },
+  { id: "light", label: "Light" },
+  { id: "dark", label: "Dark" },
+];
+
+/** Per-device appearance: remembered on this device only, never synced. */
+function AppearancePicker() {
+  const [theme, setTheme] = useTheme();
+  return (
+    <div role="group" aria-label="Appearance">
+      <div className="menu-label">Appearance (this device)</div>
+      <div className="segmented three">
+        {THEMES.map((t) => (
+          <button key={t.id} type="button" aria-pressed={theme === t.id} onClick={() => setTheme(t.id)}>
+            {t.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -121,6 +137,7 @@ function UserMenu({ user }: { user: User }) {
           <div className="menu-user">
             Signed in as <strong>{user.username}</strong>
           </div>
+          <AppearancePicker />
           {!confirm ? (
             <button className="danger-text" onClick={() => (pending > 0 ? setConfirm(true) : void auth.signOut())}>
               Sign out

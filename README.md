@@ -10,6 +10,8 @@ A personal app with three sections, synced across a MacBook Air M1, a Windows 11
 
 It also exports logs to Excel for a date range and deletes logs older than a chosen date. All deletes are hard deletes.
 
+**Running it for real:** see [DEPLOY.md](DEPLOY.md). It covers the Mac service, Tailscale, installing on each device, backups and restore.
+
 ## Architecture
 
 ```
@@ -94,4 +96,5 @@ All endpoints are under `/api`. Errors look like `{ "error": "<code>", "message"
 - [x] **Phase A: Foundation.** 0 skeleton · 1 shared package
 - [x] **Phase B: Server.** 2 core · 3 SQLite · 4 auth and isolation · 5 sync API · 6 SSE · 7 black-box tests
 - [x] **Phase C: PWA.** 8 shell · 9 local store · 10 SyncEngine · 11 TASKS · 12 PRIORITY · 13 LOG · 14 export and purge
-- [ ] **Phase D: Run it.** 15 deploy on the Mac (launchd, Tailscale, backups) · 16 install on devices and do the end-to-end check
+- [x] **Phase D: Run it.** 15 Mac service (launchd, auto-restart, daily verified backups, restore) · Tailscale publish script · 16 device install guide and end-to-end checklist in DEPLOY.md
+  - [ ] your steps: install and log in to Tailscale, enable HTTPS certs, run `deploy/tailscale.sh`, install on Windows and the M31 (DEPLOY.md steps 2–6)

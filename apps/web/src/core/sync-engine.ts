@@ -34,6 +34,9 @@ export interface SyncEngineDeps {
   /** Called once when the server rejects the session. */
   onUnauthorized?: () => void;
   debounceMs?: number;
+  /** Retry backoff after a failed sync (defaults 1s → 30s). */
+  retryMinMs?: number;
+  retryMaxMs?: number;
   now?: () => number;
 }
 
@@ -47,6 +50,8 @@ export class SyncEngine implements SyncTrigger {
   private disconnect: (() => void) | null = null;
   private unsubscribeStore: (() => void) | null = null;
   private stopped = true;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryDelay = 0;
 
   constructor(deps: SyncEngineDeps) {
     this.deps = deps;
@@ -59,7 +64,12 @@ export class SyncEngine implements SyncTrigger {
     this.disconnect =
       this.deps.realtime?.connect({
         onChanged: (cursor) => void this.onRemoteCursor(cursor),
-        onStatus: (realtime) => this.update({ realtime }),
+        onStatus: (realtime) => {
+          const reopened = realtime === "open" && this.status.realtime !== "open";
+          this.update({ realtime });
+          // Events may have been missed while the stream was down: catch up.
+          if (reopened) this.requestSync();
+        },
       }) ?? null;
     void this.refreshPending();
     void this.syncNow();
@@ -69,6 +79,9 @@ export class SyncEngine implements SyncTrigger {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    this.retryDelay = 0;
     this.disconnect?.();
     this.disconnect = null;
     this.unsubscribeStore?.();
@@ -123,6 +136,7 @@ export class SyncEngine implements SyncTrigger {
     try {
       await this.push();
       await this.pull();
+      this.retryDelay = 0;
       this.update({ state: "idle", lastSyncedAt: (this.deps.now ?? Date.now)() });
     } catch (err) {
       if (err instanceof AuthExpiredError) {
@@ -131,13 +145,31 @@ export class SyncEngine implements SyncTrigger {
         this.deps.onUnauthorized?.();
       } else if (err instanceof NetworkError) {
         this.update({ state: "offline", message: "Server unreachable; changes are saved on this device" });
+        this.scheduleRetry();
       } else {
         console.error("sync failed", err);
         this.update({ state: "error", message: err instanceof Error ? err.message : String(err) });
+        this.scheduleRetry();
       }
     } finally {
       await this.refreshPending();
     }
+  }
+
+  /**
+   * After a failure, try again on our own: 1s, 2s, 4s … capped at 30s.
+   * A stalled request on a phone (Wi-Fi power-save, VPN reconnect) usually
+   * succeeds on the very next attempt over a fresh connection.
+   */
+  private scheduleRetry() {
+    if (this.stopped || this.retryTimer) return;
+    const min = this.deps.retryMinMs ?? 1000;
+    const max = this.deps.retryMaxMs ?? 30_000;
+    this.retryDelay = this.retryDelay ? Math.min(this.retryDelay * 2, max) : min;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      void this.syncNow();
+    }, this.retryDelay);
   }
 
   private async push(): Promise<void> {
