@@ -81,3 +81,28 @@ export function formatMonth(year: number, month: number, locale?: string): strin
     timeZone: "UTC",
   });
 }
+
+export type InsertTitleResult =
+  | { ok: true; text: string; cursor: number }
+  | { ok: false; reason: "present" | "too-long" };
+
+/** True if `piece` already appears in `text` as a whole entry (not inside a longer title). */
+function hasEntry(text: string, piece: string): boolean {
+  for (let i = text.indexOf(piece); i !== -1; i = text.indexOf(piece, i + 1)) {
+    if (i === 0 || text[i - 1] === ";" || /\s/.test(text[i - 1]!)) return true;
+  }
+  return false;
+}
+
+/**
+ * TIMER bar: put `title;` at the cursor. Refused if that title is already
+ * in the bar (the user removes it by hand) or the result would exceed `max`.
+ */
+export function insertTitle(text: string, cursor: number, title: string, max: number): InsertTitleResult {
+  const piece = `${title};`;
+  if (hasEntry(text, piece)) return { ok: false, reason: "present" };
+  const at = Math.max(0, Math.min(cursor, text.length));
+  const next = text.slice(0, at) + piece + text.slice(at);
+  if (next.length > max) return { ok: false, reason: "too-long" };
+  return { ok: true, text: next, cursor: at + piece.length };
+}

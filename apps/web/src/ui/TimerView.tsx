@@ -1,10 +1,20 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { LIMITS, splitByDay } from "@pm/shared";
+import { insertTitle, priorityOrder } from "../core/views.ts";
 import { CheckIcon, XIcon } from "./icons.tsx";
-import { useServices } from "./services.tsx";
+import { useLive, useServices } from "./services.tsx";
+import { cardLook } from "./TaskCard.tsx";
 import { formatElapsed, readTimerStart, saveTimerStart } from "./timer-store.ts";
 
-/** A finger lifting right after the opening touch may land on ✕: ignore it. */
+/** A finger lifting right after the opening touch may land on ✕ or a card: ignore it. */
 const GHOST_TAP_MS = 300;
 
 /**
@@ -12,24 +22,37 @@ const GHOST_TAP_MS = 300;
  *
  * Hover (mouse), touch (finger) or Space/Enter replaces the button with:
  *   - ONE fixed time above (how long since the count last restarted),
- *   - a text bar, and ✓ / ✕ under it.
+ *   - a text bar exactly where the button was (screen centre),
+ *   - ✓ / ✕ under it, and every task title (priority order) under those.
+ * Tapping a title types `title;` at the cursor (once; remove it by hand).
  * ✓ logs the time from the last restart until NOW under the typed text,
  *   split across days at each local midnight; then the count restarts.
  * ✕ logs nothing; the button comes back and the count restarts from now.
  */
 export function TimerView() {
   const { logs } = useServices();
+  const tasks = useLive(async (s) => priorityOrder(await s.store.listTasks(), await s.store.listPlacements()), []);
   const [shown, setShown] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const openedAt = useRef(0);
+  const pendingCursor = useRef<number | null>(null);
   const open = shown !== null;
 
   useEffect(() => {
     if (open) input.current?.focus();
   }, [open]);
+
+  // After a title is inserted, put the cursor right after its ";".
+  useLayoutEffect(() => {
+    const at = pendingCursor.current;
+    if (at === null || !input.current) return;
+    pendingCursor.current = null;
+    input.current.focus();
+    input.current.setSelectionRange(at, at);
+  }, [text]);
 
   const reveal = () => {
     if (open) return;
@@ -42,6 +65,8 @@ export function TimerView() {
     openedAt.current = now;
     setShown(formatElapsed(now - startedAt));
   };
+
+  const ghostTap = () => Date.now() - openedAt.current < GHOST_TAP_MS;
 
   const close = () => {
     saveTimerStart(Date.now());
@@ -62,6 +87,19 @@ export function TimerView() {
     else setError(result.error); // keep the bar and the text so nothing is lost
   };
 
+  const pick = (title: string) => {
+    if (ghostTap()) return;
+    const cursor = input.current?.selectionStart ?? text.length;
+    const r = insertTitle(text, cursor, title, LIMITS.titleMax);
+    if (!r.ok) {
+      if (r.reason === "too-long") setError(`Too long: the bar holds at most ${LIMITS.titleMax} characters`);
+      return; // "present": already typed, nothing to do
+    }
+    pendingCursor.current = r.cursor;
+    setText(r.text);
+    setError(null);
+  };
+
   const onButtonKey = (e: KeyboardEvent) => {
     if (e.key !== " " && e.key !== "Enter") return;
     e.preventDefault();
@@ -75,15 +113,17 @@ export function TimerView() {
     }
   };
 
-  // The time slot above is always reserved and mirrored by a spacer below,
-  // so the button (or the bar that replaces it) stays exactly centred.
+  // Three rows: time | button-or-bar | everything below. The outer rows are
+  // equal, so the middle one (button, then bar) sits exactly at the centre.
   return (
     <section className="view timer">
-      <output className="timer-display" aria-label="Time since last check" hidden={!open}>
-        {shown ?? ""}
-      </output>
+      <div className="timer-top">
+        <output className="timer-display" aria-label="Time since last check" hidden={!open}>
+          {shown ?? ""}
+        </output>
+      </div>
       {open ? (
-        <form className="timer-query" onSubmit={submit}>
+        <form className="timer-form" onSubmit={submit}>
           <input
             ref={input}
             className="timer-input"
@@ -97,37 +137,54 @@ export function TimerView() {
             }}
             onKeyDown={onInputKey}
           />
-          <div className="timer-actions">
-            <button type="submit" className="timer-ok" aria-label="Log it" disabled={!text.trim() || saving}>
-              <CheckIcon />
-            </button>
-            <button
-              type="button"
-              className="timer-cancel"
-              aria-label="Cancel"
-              onClick={() => Date.now() - openedAt.current >= GHOST_TAP_MS && close()}
-            >
-              <XIcon />
-            </button>
+          <div className="timer-bottom">
+            <div className="timer-actions">
+              <button type="submit" className="timer-ok" aria-label="Log it" disabled={!text.trim() || saving}>
+                <CheckIcon />
+              </button>
+              <button type="button" className="timer-cancel" aria-label="Cancel" onClick={() => !ghostTap() && close()}>
+                <XIcon />
+              </button>
+            </div>
+            {error && (
+              <p className="error timer-error" role="alert">
+                {error}
+              </p>
+            )}
+            {tasks && tasks.length > 0 && (
+              <ul className="timer-tasks" aria-label="Tasks">
+                {tasks.map((t) => (
+                  <li key={t.id}>
+                    <button
+                      type="button"
+                      className="timer-task"
+                      style={{ "--hue": cardLook(t.id).hue } as CSSProperties}
+                      // keep focus (and the phone keyboard) on the bar
+                      onPointerDown={(e) => e.preventDefault()}
+                      onClick={() => pick(t.title)}
+                    >
+                      {t.title}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-          {error && (
-            <p className="error timer-error" role="alert">
-              {error}
-            </p>
-          )}
         </form>
       ) : (
-        <button
-          type="button"
-          className="timer-button"
-          aria-label="Timer"
-          onPointerEnter={reveal}
-          onPointerDown={reveal}
-          onKeyDown={onButtonKey}
-          onContextMenu={(e) => e.preventDefault()}
-        />
+        <>
+          <button
+            type="button"
+            className="timer-button"
+            aria-label="Timer"
+            onPointerEnter={reveal}
+            onPointerDown={reveal}
+            onKeyDown={onButtonKey}
+            onContextMenu={(e) => e.preventDefault()}
+          />
+          <div className="timer-bottom" aria-hidden="true" />
+        </>
       )}
-      <span className="timer-spacer" aria-hidden="true" />
     </section>
   );
 }

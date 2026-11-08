@@ -819,35 +819,36 @@ textarea {
   }
 }
 
-/* TIMER: empty screen, one round button dead centre, time just above it */
+/* TIMER: three rows. The top (time) and bottom (✓ / ✕ + task titles) rows
+   are equal, so the middle row (the button, then the bar) is dead centre. */
 .timer {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  gap: 1.75rem;
-  min-height: calc(100dvh - 11rem);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);
+  justify-items: center;
+  row-gap: 1.25rem;
+  height: calc(100dvh - 11rem);
 }
 @media (min-width: 760px) {
   .timer {
-    min-height: calc(100dvh - 7rem);
+    height: calc(100dvh - 7rem);
   }
 }
-/* The time slot above and the spacer below are the same height, so the
-   button is exactly centred whether or not the time is showing. */
-.timer-display,
-.timer-spacer {
-  display: block;
-  min-height: 1.2em;
-  font-size: clamp(2.75rem, 13vw, 4.5rem);
-  line-height: 1.2;
+.timer-form {
+  display: contents; /* its bar and bottom block sit in the grid rows */
+}
+.timer-top {
+  display: flex;
+  align-items: flex-end;
 }
 .timer-display {
+  font-size: clamp(2.75rem, 13vw, 4.5rem);
+  line-height: 1.2;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
 .timer-display[hidden] {
+  display: block;
   visibility: hidden;
 }
 .timer-button {
@@ -868,18 +869,19 @@ textarea {
   -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
 }
-/* Replaces the button in place; same height, so nothing around it jumps. */
-.timer-query {
+.timer-input {
+  width: min(100%, 22rem);
+  text-align: center;
+}
+.timer-bottom {
   display: flex;
   flex-direction: column;
-  justify-content: center;
   align-items: center;
   gap: 0.9rem;
   width: min(100%, 22rem);
-  min-height: 8.5rem;
-}
-.timer-input {
-  text-align: center;
+  min-height: 0;
+  overflow-y: auto; /* many tasks: this part scrolls, the bar stays put */
+  padding-bottom: 0.5rem;
 }
 .timer-actions {
   display: flex;
@@ -905,4 +907,32 @@ textarea {
 .timer-error {
   margin: 0;
   text-align: center;
+}
+/* Title-only task cards, in each task's own colour */
+.timer-tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+  width: 100%;
+}
+.timer-task {
+  position: relative;
+  width: 100%;
+  padding: 0.6rem 0.8rem 0.6rem 1rem;
+  text-align: left;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  border-radius: 12px;
+  background: linear-gradient(135deg, hsl(var(--hue) 70% var(--card-l)), var(--surface) 70%);
+  border: 1px solid color-mix(in srgb, hsl(var(--hue) 60% 50%) 22%, var(--border));
+  overflow: hidden;
+}
+.timer-task::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: hsl(var(--hue) 70% var(--card-accent-l));
 }

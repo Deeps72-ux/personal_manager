@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { todayLocal } from "@pm/shared";
 import { MemoryStore } from "../src/adapters/memory-store.ts";
-import { LogActions } from "../src/core/actions.ts";
+import { LogActions, TaskActions } from "../src/core/actions.ts";
+import { insertTitle } from "../src/core/views.ts";
 import { ServicesProvider, type Services } from "../src/ui/services.tsx";
 import { formatElapsed, readTimerStart } from "../src/ui/timer-store.ts";
 import { TimerView } from "../src/ui/TimerView.tsx";
@@ -24,14 +25,18 @@ const enter = () => fireEvent.pointerEnter(button());
 
 function renderTimer() {
   const store = new MemoryStore();
-  const logs = new LogActions({ store, sync: { requestSync: () => undefined } });
+  const sync = { requestSync: () => undefined };
+  const logs = new LogActions({ store, sync });
+  const tasks = new TaskActions({ store, sync });
   render(
     <ServicesProvider value={{ store, logs } as unknown as Services}>
       <TimerView />
     </ServicesProvider>,
   );
-  return { store };
+  return { store, tasks };
 }
+const card = (title: string) => screen.getByRole("button", { name: title });
+const barText = () => (bar() as HTMLInputElement).value;
 async function logIt(text: string) {
   fireEvent.change(bar()!, { target: { value: text } });
   await act(async () => void fireEvent.click(ok()));
@@ -153,5 +158,85 @@ describe("TimerView", () => {
     fireEvent.change(bar()!, { target: { value: "Typing" } });
     await act(async () => void fireEvent.submit((bar() as HTMLInputElement).form!));
     expect(await store.listLogsForDay(DAY0)).toMatchObject([{ seconds: 3, taskTitle: "Typing" }]);
+  });
+});
+
+describe("insertTitle", () => {
+  it("puts title; at the cursor and moves the cursor after the ;", () => {
+    expect(insertTitle("", 0, "Gym", 200)).toEqual({ ok: true, text: "Gym;", cursor: 4 });
+    expect(insertTitle("Gym;", 4, "Read", 200)).toEqual({ ok: true, text: "Gym;Read;", cursor: 9 });
+    expect(insertTitle("ab", 1, "X", 200)).toEqual({ ok: true, text: "aX;b", cursor: 3 });
+    expect(insertTitle("ab", 99, "X", 200)).toMatchObject({ text: "abX;" });
+  });
+
+  it("does nothing if that title is already in the bar", () => {
+    expect(insertTitle("Gym;Read;", 0, "Read", 200)).toEqual({ ok: false, reason: "present" });
+    expect(insertTitle("notes Gym; more", 0, "Gym", 200)).toEqual({ ok: false, reason: "present" });
+    // a longer title that merely ends the same way does not count
+    expect(insertTitle("Big Gym;", 8, "Gym", 200)).toEqual({ ok: false, reason: "present" }); // after a space: whole entry
+    expect(insertTitle("BigGym;", 7, "Gym", 200)).toMatchObject({ ok: true, text: "BigGym;Gym;" });
+  });
+
+  it("refuses when the result would be over the limit", () => {
+    expect(insertTitle("x".repeat(196), 196, "Gym", 200)).toMatchObject({ ok: true });
+    expect(insertTitle("x".repeat(197), 197, "Gym", 200)).toEqual({ ok: false, reason: "too-long" });
+  });
+});
+
+describe("TimerView task cards", () => {
+  async function openWithTasks(...titles: string[]) {
+    const app = renderTimer();
+    for (const t of [...titles].reverse()) await act(() => app.tasks.create({ title: t, description: "d" }));
+    enter();
+    await act(async () => undefined); // let the live task list load
+    wait(400); // past the ghost-tap guard
+    return app;
+  }
+
+  it("lists every task, title only, in priority order, below ✓ / ✕", async () => {
+    await openWithTasks("Gym", "Read", "Write");
+    const items = within(screen.getByRole("list", { name: "Tasks" })).getAllByRole("button");
+    expect(items.map((b) => b.textContent)).toEqual(["Gym", "Read", "Write"]);
+    expect(cancel().compareDocumentPosition(items[0]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("d")).toBeNull(); // no description
+  });
+
+  it("tapping cards types title; at the cursor; tapping again does nothing", async () => {
+    await openWithTasks("Gym", "Read");
+    fireEvent.click(card("Gym"));
+    fireEvent.click(card("Read"));
+    expect(barText()).toBe("Gym;Read;");
+    expect((bar() as HTMLInputElement).selectionStart).toBe(9);
+    fireEvent.click(card("Gym"));
+    expect(barText()).toBe("Gym;Read;");
+  });
+
+  it("the user can type and edit around inserted titles", async () => {
+    await openWithTasks("Gym");
+    fireEvent.change(bar()!, { target: { value: "morning " } });
+    (bar() as HTMLInputElement).setSelectionRange(0, 0);
+    fireEvent.click(card("Gym"));
+    expect(barText()).toBe("Gym;morning ");
+    fireEvent.change(bar()!, { target: { value: "morning " } }); // backspaced it out (cursor at end)
+    fireEvent.click(card("Gym")); // so it can be added again
+    expect(barText()).toBe("morning Gym;");
+  });
+
+  it("a tap that would go over 200 characters is refused with a message", async () => {
+    await openWithTasks("Gym");
+    fireEvent.change(bar()!, { target: { value: "x".repeat(198) } });
+    fireEvent.click(card("Gym"));
+    expect(barText()).toBe("x".repeat(198));
+    expect(screen.getByRole("alert").textContent).toMatch(/200/);
+  });
+
+  it("logs the whole bar as one entry", async () => {
+    localStorage.setItem("pm.timer.startedAt", String(T0 - 60_000));
+    const { store } = await openWithTasks("Gym", "Read");
+    fireEvent.click(card("Gym"));
+    fireEvent.click(card("Read"));
+    await act(async () => void fireEvent.click(ok()));
+    const all = await store.listLogsForDay(DAY0);
+    expect(all.map((l) => l.taskTitle)).toEqual(["Gym;Read;"]);
   });
 });
