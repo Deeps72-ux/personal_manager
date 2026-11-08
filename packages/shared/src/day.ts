@@ -31,3 +31,28 @@ export function todayLocal(now: Date = new Date()): Day {
   const d = String(now.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
+
+/** One day's share of a time span. */
+export interface DayPart {
+  day: Day;
+  seconds: number;
+}
+
+/**
+ * Cut the span [startMs, endMs) at each LOCAL midnight: one part per day,
+ * oldest first. Works for any number of days. Parts under 1 s are dropped,
+ * and a part never exceeds DAY_SECONDS (a 25-hour clock-change day is capped).
+ */
+export function splitByDay(startMs: number, endMs: number): DayPart[] {
+  const parts: DayPart[] = [];
+  let from = startMs;
+  while (from < endMs) {
+    const d = new Date(from);
+    const nextMidnight = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+    const to = Math.min(nextMidnight, endMs);
+    const seconds = Math.min(DAY_SECONDS, Math.floor((to - from) / 1000));
+    if (seconds >= 1) parts.push({ day: todayLocal(d), seconds });
+    from = to;
+  }
+  return parts;
+}

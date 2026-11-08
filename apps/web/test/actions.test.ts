@@ -87,6 +87,43 @@ describe("PriorityActions", () => {
 });
 
 describe("LogActions", () => {
+  it("addSpan saves one row per day under the same title, in one go", async () => {
+    const app = setup();
+    const r = await app.logs.addSpan(
+      [
+        { day: "2026-11-05", seconds: 3600 },
+        { day: "2026-11-06", seconds: 4500 },
+      ],
+      "  Reading  ",
+    );
+    expect(r).toMatchObject({ ok: true });
+    expect(await app.store.listLogsForDay("2026-11-05")).toMatchObject([{ seconds: 3600, taskTitle: "Reading" }]);
+    expect(await app.store.listLogsForDay("2026-11-06")).toMatchObject([{ seconds: 4500, taskTitle: "Reading" }]);
+    expect(app.syncRequests()).toBe(1);
+  });
+
+  it("addSpan is all-or-nothing when any day would go over 24 hours", async () => {
+    const app = setup();
+    await app.logs.add("2026-11-06", "23h", "x");
+    const r = await app.logs.addSpan(
+      [
+        { day: "2026-11-05", seconds: 60 },
+        { day: "2026-11-06", seconds: 3601 },
+      ],
+      "y",
+    );
+    expect(r).toMatchObject({ ok: false });
+    expect(await app.store.listLogsForDay("2026-11-05")).toEqual([]);
+  });
+
+  it("addSpan refuses blank text, empty spans and purged days", async () => {
+    const app = setup();
+    expect(await app.logs.addSpan([{ day: "2026-11-05", seconds: 5 }], "  ")).toMatchObject({ ok: false });
+    expect(await app.logs.addSpan([], "x")).toMatchObject({ ok: false });
+    await app.logs.purgeBefore("2026-01-01");
+    expect(await app.logs.addSpan([{ day: "2025-12-31", seconds: 5 }], "x")).toMatchObject({ ok: false });
+  });
+
   it("accepts number or text seconds, same task many times a day", async () => {
     const app = setup();
     expect(await app.logs.add("2026-11-05", "8*60*60", "Sleep")).toMatchObject({ ok: true });

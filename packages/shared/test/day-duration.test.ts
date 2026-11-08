@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DAY_SECONDS, daysInMonth, isValidDay, todayLocal } from "../src/day.ts";
+import { DAY_SECONDS, daysInMonth, isValidDay, splitByDay, todayLocal } from "../src/day.ts";
 import { fitsInDay, formatSeconds, parseSecondsInput, sumSeconds } from "../src/duration.ts";
 
 describe("day", () => {
@@ -74,5 +74,39 @@ describe("24h rule (UI-only)", () => {
     expect(total).toBe(28_827);
     expect(fitsInDay(total, DAY_SECONDS - total)).toBe(true);
     expect(fitsInDay(total, DAY_SECONDS - total + 1)).toBe(false);
+  });
+});
+
+describe("splitByDay", () => {
+  // Local times, so the tests pass in any timezone.
+  const at = (d: number, h: number, m = 0, s = 0) => new Date(2026, 10, d, h, m, s).getTime();
+
+  it("same day: one part", () => {
+    expect(splitByDay(at(5, 9), at(5, 10, 30))).toEqual([{ day: "2026-11-05", seconds: 5400 }]);
+  });
+
+  it("across midnight: each day gets its own share", () => {
+    expect(splitByDay(at(5, 23), at(6, 1, 15))).toEqual([
+      { day: "2026-11-05", seconds: 3600 },
+      { day: "2026-11-06", seconds: 4500 },
+    ]);
+  });
+
+  it("three or more days: full days in the middle", () => {
+    const parts = splitByDay(at(5, 22), at(8, 2));
+    expect(parts.map((p) => p.day)).toEqual(["2026-11-05", "2026-11-06", "2026-11-07", "2026-11-08"]);
+    expect(parts.map((p) => p.seconds)).toEqual([7200, DAY_SECONDS, DAY_SECONDS, 7200]);
+  });
+
+  it("empty or backwards span, and sub-second slivers, give nothing", () => {
+    expect(splitByDay(at(5, 9), at(5, 9))).toEqual([]);
+    expect(splitByDay(at(5, 10), at(5, 9))).toEqual([]);
+    expect(splitByDay(at(5, 9), at(5, 9) + 999)).toEqual([]);
+    // ends 0.5 s after midnight: the next day's sliver is dropped
+    expect(splitByDay(at(5, 23, 59, 59), at(6, 0) + 500)).toEqual([{ day: "2026-11-05", seconds: 1 }]);
+  });
+
+  it("parts never exceed 24 hours (clock-change days)", () => {
+    for (const p of splitByDay(at(1, 0), at(30, 0))) expect(p.seconds).toBeLessThanOrEqual(DAY_SECONDS);
   });
 });

@@ -69,3 +69,9 @@ export const TimerIcon = () => (
     <path d="M12 9v4l2.5 2.5M9.5 2h5" />
   </svg>
 );
+
+export const CheckIcon = () => (
+  <svg {...props}>
+    <path d="M5 12.5l4.5 4.5L19 7.5" />
+  </svg>
+);

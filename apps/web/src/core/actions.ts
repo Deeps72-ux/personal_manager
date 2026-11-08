@@ -19,6 +19,7 @@ import {
   uuidv7,
   type Change,
   type Day,
+  type DayPart,
   type LogEntry,
   type NewChange,
   type Task,
@@ -114,6 +115,7 @@ export class PriorityActions {
 // ───────────── LOG ─────────────
 
 export type AddLogResult = { ok: true; entry: LogEntry } | { ok: false; error: string };
+export type AddSpanResult = { ok: true; entries: LogEntry[] } | { ok: false; error: string };
 
 export class LogActions {
   private readonly deps: Deps;
@@ -143,6 +145,44 @@ export class LogActions {
       const entry: LogEntry = { id: uuidv7(), day, seconds: parsed.seconds, taskTitle: title.slice(0, LIMITS.titleMax) };
       await record(tx, { op: "createLog", entry });
       return { ok: true, entry };
+    });
+    if (result.ok) this.deps.sync.requestSync();
+    return result;
+  }
+
+  /**
+   * Record one span of time that may cover several days (from splitByDay):
+   * one log row per day, all under the same title, all-or-nothing. The same
+   * rules as add() apply to EVERY day; if any day fails, nothing is saved.
+   */
+  async addSpan(parts: readonly DayPart[], taskTitle: string): Promise<AddSpanResult> {
+    const title = taskTitle.trim().slice(0, LIMITS.titleMax);
+    if (!title) return { ok: false, error: "Type what you did" };
+    const real = parts.filter((p) => p.seconds >= 1);
+    if (real.length === 0) return { ok: false, error: "Less than a second to log" };
+    for (const p of real) {
+      if (!isValidDay(p.day)) return { ok: false, error: "Invalid day" };
+      if (!Number.isInteger(p.seconds) || p.seconds > 86_400) return { ok: false, error: "Invalid duration" };
+    }
+    const purged = await this.deps.store.purgedBefore();
+    const old = purged ? real.find((p) => p.day < purged) : undefined;
+    if (old) return { ok: false, error: `Logs before ${purged} were deleted` };
+
+    const result = await this.deps.store.write(async (tx): Promise<AddSpanResult> => {
+      for (const p of real) {
+        const total = sumSeconds(await tx.listLogsForDay(p.day));
+        if (!fitsInDay(total, p.seconds)) {
+          const left = 86_400 - total;
+          return { ok: false, error: `Over 24 hours on ${p.day}: only ${formatSeconds(left)} left` };
+        }
+      }
+      const entries: LogEntry[] = [];
+      for (const p of real) {
+        const entry: LogEntry = { id: uuidv7(), day: p.day, seconds: p.seconds, taskTitle: title };
+        await record(tx, { op: "createLog", entry });
+        entries.push(entry);
+      }
+      return { ok: true, entries };
     });
     if (result.ok) this.deps.sync.requestSync();
     return result;
