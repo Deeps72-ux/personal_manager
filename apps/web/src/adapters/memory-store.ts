@@ -12,6 +12,7 @@ interface Data {
   outbox: Change[];
   cursor: number;
   purgedBefore: Day | null;
+  timerStart: number | null;
 }
 
 const empty = (): Data => ({
@@ -21,6 +22,7 @@ const empty = (): Data => ({
   outbox: [],
   cursor: 0,
   purgedBefore: null,
+  timerStart: null,
 });
 
 const clone = (d: Data): Data => ({
@@ -30,6 +32,7 @@ const clone = (d: Data): Data => ({
   outbox: [...d.outbox],
   cursor: d.cursor,
   purgedBefore: d.purgedBefore,
+  timerStart: d.timerStart,
 });
 
 const byDayThenId = (a: LogEntry, b: LogEntry) => (a.day === b.day ? (a.id < b.id ? -1 : 1) : a.day < b.day ? -1 : 1);
@@ -77,6 +80,9 @@ export class MemoryStore implements LocalStore {
   async purgedBefore() {
     return this.data.purgedBefore;
   }
+  async timerStart() {
+    return this.data.timerStart;
+  }
   async wipe() {
     this.data = empty();
     this.emit();
@@ -110,6 +116,8 @@ function txFor(d: Data): LocalTx {
     setCursor: async (c) => void (d.cursor = c),
     getPurgedBefore: async () => d.purgedBefore,
     setPurgedBefore: async (day) => void (d.purgedBefore = day),
+    getTimerStart: async () => d.timerStart,
+    setTimerStart: async (ms) => void (d.timerStart = ms),
     clearSynced: async () => {
       d.tasks.clear();
       d.placements.clear();

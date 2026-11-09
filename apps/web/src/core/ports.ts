@@ -42,6 +42,10 @@ export interface LocalTx {
   setPurgedBefore(day: Day | null): Promise<void>;
   /** Remove all synced rows (tasks, placements, logs). Outbox is kept. */
   clearSynced(): Promise<void>;
+
+  /** TIMER start (epoch ms), per device, never synced. Kept by clearSynced. */
+  getTimerStart(): Promise<number | null>;
+  setTimerStart(ms: number): Promise<void>;
 }
 
 export interface LocalStore {
@@ -58,6 +62,7 @@ export interface LocalStore {
   removeFromOutbox(changeIds: readonly string[]): Promise<void>;
   cursor(): Promise<number>;
   purgedBefore(): Promise<Day | null>;
+  timerStart(): Promise<number | null>;
 
   /** Delete everything (used on sign-out / switching user). */
   wipe(): Promise<void>;

@@ -103,6 +103,32 @@ describe.each(impls)("%s", (_name, makeStore, makeSessions) => {
     expect(await s.listTasks()).toEqual([]);
   });
 
+  it("timer start: per device, kept by clearSynced, cleared by wipe", async () => {
+    const s = makeStore();
+    expect(await s.timerStart()).toBeNull();
+    await s.write((tx) => tx.setTimerStart(1234));
+    expect(await s.timerStart()).toBe(1234);
+    await s.write(async (tx) => expect(await tx.getTimerStart()).toBe(1234));
+    await s.write((tx) => tx.clearSynced());
+    expect(await s.timerStart()).toBe(1234);
+    await s.wipe();
+    expect(await s.timerStart()).toBeNull();
+  });
+
+  it("a failed write rolls back the timer start with everything else", async () => {
+    const s = makeStore();
+    await s.write((tx) => tx.setTimerStart(1));
+    await expect(
+      s.write(async (tx) => {
+        await tx.putLog(log("2026-11-05"));
+        await tx.setTimerStart(2);
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect(await s.timerStart()).toBe(1);
+    expect(await s.listLogsForDay("2026-11-05")).toEqual([]);
+  });
+
   it("notifies subscribers after commits", async () => {
     const s = makeStore();
     let calls = 0;

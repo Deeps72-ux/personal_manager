@@ -8,7 +8,7 @@ import { DexieStore } from "./adapters/dexie-store.ts";
 import { HttpRemoteApi } from "./adapters/http-api.ts";
 import { SseChannel } from "./adapters/sse-channel.ts";
 import { BrowserFileSaver, XlsxLogWriter } from "./adapters/xlsx.ts";
-import { LogActions, PriorityActions, TaskActions } from "./core/actions.ts";
+import { LogActions, PriorityActions, TaskActions, TimerActions } from "./core/actions.ts";
 import { AuthService, SessionHolder } from "./core/auth.ts";
 import { ExportLogs } from "./core/export-logs.ts";
 import { SyncEngine } from "./core/sync-engine.ts";
@@ -44,6 +44,7 @@ const services: Services = {
   tasks: new TaskActions({ store: db, sync }),
   priority: new PriorityActions({ store: db, sync }),
   logs: new LogActions({ store: db, sync }),
+  timer: new TimerActions({ store: db, sync }),
   exporter: new ExportLogs({ store: db, writer: new XlsxLogWriter(), saver: new BrowserFileSaver() }),
 };
 

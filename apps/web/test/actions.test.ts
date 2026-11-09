@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MemoryStore } from "../src/adapters/memory-store.ts";
-import { LogActions, PriorityActions, TaskActions } from "../src/core/actions.ts";
+import { LogActions, PriorityActions, TaskActions, TimerActions } from "../src/core/actions.ts";
 import { ValidationError } from "../src/core/errors.ts";
 import { priorityOrder } from "../src/core/views.ts";
 
@@ -13,6 +13,7 @@ function setup() {
     tasks: new TaskActions({ store, sync }),
     priority: new PriorityActions({ store, sync }),
     logs: new LogActions({ store, sync }),
+    timer: new TimerActions({ store, sync }),
     syncRequests: () => syncRequests,
     order: async () => priorityOrder(await store.listTasks(), await store.listPlacements()).map((t) => t.title),
   };
@@ -87,43 +88,6 @@ describe("PriorityActions", () => {
 });
 
 describe("LogActions", () => {
-  it("addSpan saves one row per day under the same title, in one go", async () => {
-    const app = setup();
-    const r = await app.logs.addSpan(
-      [
-        { day: "2026-11-05", seconds: 3600 },
-        { day: "2026-11-06", seconds: 4500 },
-      ],
-      "  Reading  ",
-    );
-    expect(r).toMatchObject({ ok: true });
-    expect(await app.store.listLogsForDay("2026-11-05")).toMatchObject([{ seconds: 3600, taskTitle: "Reading" }]);
-    expect(await app.store.listLogsForDay("2026-11-06")).toMatchObject([{ seconds: 4500, taskTitle: "Reading" }]);
-    expect(app.syncRequests()).toBe(1);
-  });
-
-  it("addSpan is all-or-nothing when any day would go over 24 hours", async () => {
-    const app = setup();
-    await app.logs.add("2026-11-06", "23h", "x");
-    const r = await app.logs.addSpan(
-      [
-        { day: "2026-11-05", seconds: 60 },
-        { day: "2026-11-06", seconds: 3601 },
-      ],
-      "y",
-    );
-    expect(r).toMatchObject({ ok: false });
-    expect(await app.store.listLogsForDay("2026-11-05")).toEqual([]);
-  });
-
-  it("addSpan refuses blank text, empty spans and purged days", async () => {
-    const app = setup();
-    expect(await app.logs.addSpan([{ day: "2026-11-05", seconds: 5 }], "  ")).toMatchObject({ ok: false });
-    expect(await app.logs.addSpan([], "x")).toMatchObject({ ok: false });
-    await app.logs.purgeBefore("2026-01-01");
-    expect(await app.logs.addSpan([{ day: "2025-12-31", seconds: 5 }], "x")).toMatchObject({ ok: false });
-  });
-
   it("accepts number or text seconds, same task many times a day", async () => {
     const app = setup();
     expect(await app.logs.add("2026-11-05", "8*60*60", "Sleep")).toMatchObject({ ok: true });
@@ -162,5 +126,72 @@ describe("LogActions", () => {
     expect(await app.store.purgedBefore()).toBe("2026-01-01");
     expect(await app.logs.add("2025-06-01", 10, "x")).toMatchObject({ ok: false });
     await expect(app.logs.purgeBefore("nope")).rejects.toThrow(ValidationError);
+  });
+});
+
+describe("TimerActions", () => {
+  // Local times, so the tests pass in any timezone.
+  const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).getTime();
+  const titles = async (app: ReturnType<typeof setup>, day: string) =>
+    (await app.store.listLogsForDay(day)).map((l) => [l.seconds, l.taskTitle]);
+
+  it("ensureStart keeps an existing start, else adopts the legacy one, else now", async () => {
+    const a = setup();
+    expect(await a.timer.ensureStart(null, 1000)).toBe(1000);
+    expect(await a.timer.ensureStart(5, 2000)).toBe(1000); // already set: unchanged
+    const b = setup();
+    expect(await b.timer.ensureStart(777, 2000)).toBe(777);
+    expect(await b.store.timerStart()).toBe(777);
+  });
+
+  it("logAndRestart: one row per day, same text, and the count restarts, together", async () => {
+    const app = setup();
+    await app.timer.restart(at(5, 23));
+    const r = await app.timer.logAndRestart("  Gym;Read;  ", at(6, 1, 15));
+    expect(r).toMatchObject({ ok: true });
+    expect(await titles(app, "2026-11-05")).toEqual([[3600, "Gym;Read;"]]);
+    expect(await titles(app, "2026-11-06")).toEqual([[4500, "Gym;Read;"]]);
+    expect(await app.store.timerStart()).toBe(at(6, 1, 15));
+    expect((await app.store.listOutbox()).map((c) => c.op)).toEqual(["createLog", "createLog"]);
+    expect(app.syncRequests()).toBe(1);
+  });
+
+  it("the same span can never be logged twice (start is read inside the transaction)", async () => {
+    const app = setup();
+    await app.timer.restart(at(5, 9));
+    expect(await app.timer.logAndRestart("x", at(5, 10))).toMatchObject({ ok: true });
+    expect(await app.timer.logAndRestart("x", at(5, 10))).toMatchObject({ ok: false }); // 0 s left to log
+    expect(await titles(app, "2026-11-05")).toEqual([[3600, "x"]]);
+  });
+
+  it("a day over 24 hours refuses everything: no logs, count NOT restarted", async () => {
+    const app = setup();
+    await app.logs.add("2026-11-06", "23h", "earlier");
+    await app.timer.restart(at(5, 23));
+    const r = await app.timer.logAndRestart("y", at(6, 2));
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining("2026-11-06") });
+    expect(await titles(app, "2026-11-05")).toEqual([]);
+    expect(await app.store.timerStart()).toBe(at(5, 23));
+  });
+
+  it("if the restart fails mid-transaction, the logs are rolled back too (atomic)", async () => {
+    const app = setup();
+    await app.timer.restart(at(5, 9));
+    const write = app.store.write.bind(app.store);
+    app.store.write = (fn) =>
+      write((tx) => fn({ ...tx, setTimerStart: async () => Promise.reject(new Error("app killed")) }));
+    await expect(app.timer.logAndRestart("z", at(5, 10))).rejects.toThrow("app killed");
+    expect(await titles(app, "2026-11-05")).toEqual([]);
+    expect(await app.store.listOutbox()).toEqual([]);
+    expect(await app.store.timerStart()).toBe(at(5, 9));
+  });
+
+  it("refuses blank text and purged days", async () => {
+    const app = setup();
+    await app.timer.restart(at(5, 9));
+    expect(await app.timer.logAndRestart("   ", at(5, 10))).toMatchObject({ ok: false });
+    await app.logs.purgeBefore("2026-11-06");
+    expect(await app.timer.logAndRestart("x", at(5, 10))).toMatchObject({ ok: false });
+    expect(await app.store.timerStart()).toBe(at(5, 9));
   });
 });

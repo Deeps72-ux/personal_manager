@@ -1,13 +1,13 @@
 /**
- * Timer state, kept PER DEVICE (not synced, no server).
+ * Timer helpers for the UI.
  *
- * Only one number is stored: the moment counting started (epoch ms).
- * Elapsed time is always computed from the clock, so it stays correct
- * while the app is closed, in the background, or the device sleeps.
+ * The timer's start time now lives in the local database (see TimerActions),
+ * so logging and restarting happen in one transaction. Older versions kept it
+ * in localStorage under KEY; it is read once to carry the count over, then removed.
  */
 const KEY = "pm.timer.startedAt";
 
-export function readTimerStart(): number | null {
+export function readLegacyTimerStart(): number | null {
   try {
     const v = Number(localStorage.getItem(KEY));
     return Number.isFinite(v) && v > 0 ? v : null;
@@ -16,11 +16,11 @@ export function readTimerStart(): number | null {
   }
 }
 
-export function saveTimerStart(ms: number): void {
+export function clearLegacyTimerStart(): void {
   try {
-    localStorage.setItem(KEY, String(ms));
+    localStorage.removeItem(KEY);
   } catch {
-    // not remembered across launches, but still works for this session
+    // nothing to clean up
   }
 }
 

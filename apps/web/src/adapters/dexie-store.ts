@@ -36,6 +36,7 @@ class Db extends Dexie {
 }
 
 const SYNCED = ["tasks", "placements", "logs"] as const;
+const TIMER_KEY = "timerStartedAt";
 
 export class DexieStore implements LocalStore, SessionStore {
   private readonly db: Db;
@@ -77,6 +78,8 @@ export class DexieStore implements LocalStore, SessionStore {
       setCursor: async (c) => void (await db.meta.put({ key: "cursor", value: c })),
       getPurgedBefore: async () => ((await db.meta.get("purgedBefore"))?.value as Day | null) ?? null,
       setPurgedBefore: async (day) => void (await db.meta.put({ key: "purgedBefore", value: day })),
+      getTimerStart: async () => ((await db.meta.get(TIMER_KEY))?.value as number | undefined) ?? null,
+      setTimerStart: async (ms) => void (await db.meta.put({ key: TIMER_KEY, value: ms })),
       clearSynced: async () => {
         await Promise.all(SYNCED.map((t) => db[t].clear()));
       },
@@ -109,6 +112,9 @@ export class DexieStore implements LocalStore, SessionStore {
   }
   async purgedBefore() {
     return ((await this.db.meta.get("purgedBefore"))?.value as Day | null | undefined) ?? null;
+  }
+  async timerStart() {
+    return ((await this.db.meta.get(TIMER_KEY))?.value as number | undefined) ?? null;
   }
   async wipe() {
     const db = this.db;

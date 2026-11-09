@@ -7,7 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import { todayLocal, type Change, type PullResponse } from "@pm/shared";
 import { MemorySessionStore, MemoryStore } from "../src/adapters/memory-store.ts";
-import { LogActions, PriorityActions, TaskActions } from "../src/core/actions.ts";
+import { LogActions, PriorityActions, TaskActions, TimerActions } from "../src/core/actions.ts";
 import { AuthService, SessionHolder } from "../src/core/auth.ts";
 import { ExportLogs } from "../src/core/export-logs.ts";
 import type { RemoteApi } from "../src/core/ports.ts";
@@ -59,6 +59,7 @@ function renderApp() {
     tasks: new TaskActions({ store, sync }),
     priority: new PriorityActions({ store, sync }),
     logs: new LogActions({ store, sync }),
+    timer: new TimerActions({ store, sync }),
     exporter: new ExportLogs({
       store,
       writer: { writeLog: async () => new Blob(["xlsx"]) },
