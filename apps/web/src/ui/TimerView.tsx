@@ -29,8 +29,6 @@ const GHOST_TAP_MS = 300;
  *   split across days at each local midnight, and restarts the count, in
  *   ONE local transaction (start time lives in the local DB, not localStorage).
  * ✕ logs nothing; the button comes back and the count restarts from now.
- * After ✓ / ✕ the button reappears under the mouse; hover only reopens it once
- * the pointer has left it (a press still opens it at once).
  */
 export function TimerView() {
   const { timer } = useServices();
@@ -43,10 +41,6 @@ export function TimerView() {
   const input = useRef<HTMLInputElement>(null);
   const openedAt = useRef(0);
   const pendingCursor = useRef<number | null>(null);
-  const timerButton = useRef<HTMLButtonElement>(null);
-  // After ✓ / ✕ the button comes back right under the mouse (✓ and ✕ sit inside
-  // its circle). Hover must not reopen it until the pointer has been elsewhere.
-  const hoverArmed = useRef(true);
   const open = openAt !== null;
   // ONE fixed time: from the start to the moment the bar opened.
   const shown = open && start != null ? formatElapsed(openAt - start) : "";
@@ -59,15 +53,6 @@ export function TimerView() {
   useEffect(() => {
     if (open) input.current?.focus();
   }, [open]);
-
-  // Re-arm hover once the pointer moves anywhere other than the button.
-  useEffect(() => {
-    const onMove = (e: PointerEvent) => {
-      if (e.target !== timerButton.current) hoverArmed.current = true;
-    };
-    document.addEventListener("pointermove", onMove);
-    return () => document.removeEventListener("pointermove", onMove);
-  }, []);
 
   // After a title is inserted, put the cursor right after its ";".
   useLayoutEffect(() => {
@@ -88,7 +73,6 @@ export function TimerView() {
   const ghostTap = () => Date.now() - openedAt.current < GHOST_TAP_MS;
 
   const hide = () => {
-    hoverArmed.current = false;
     setOpenAt(null);
     setText("");
     setError(null);
@@ -200,9 +184,7 @@ export function TimerView() {
             type="button"
             className="timer-button"
             aria-label="Timer"
-            ref={timerButton}
-            onPointerEnter={() => hoverArmed.current && reveal()}
-            onPointerLeave={() => (hoverArmed.current = true)}
+            onPointerEnter={reveal}
             onPointerDown={reveal}
             onKeyDown={onButtonKey}
             onContextMenu={(e) => e.preventDefault()}

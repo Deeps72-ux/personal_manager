@@ -22,8 +22,6 @@ const bar = () => screen.queryByRole("textbox", { name: "What did you do?" });
 const ok = () => screen.getByRole("button", { name: "Log it" });
 const cancel = () => screen.getByRole("button", { name: "Cancel" });
 const enter = () => fireEvent.pointerEnter(button());
-/** The mouse wanders off the button (re-arms hover after ✓ / ✕). */
-const moveAway = () => fireEvent.pointerMove(document.body);
 
 /** Renders the timer; `startedAt` seeds the start kept in the local store. */
 async function renderTimer(startedAt?: number) {
@@ -114,32 +112,8 @@ describe("TimerView", () => {
     expect(await store.listLogsForDay(DAY0)).toEqual([]);
 
     wait(90_000);
-    moveAway();
     enter();
     expect(display()?.textContent).toBe("00:01:30");
-  });
-
-  it("after ✓ / ✕ the button stays, even though it comes back under the mouse", async () => {
-    await renderTimer(T0 - 60_000);
-    enter();
-    await logIt("work");
-    expect(bar()).toBeNull();
-    enter(); // the button appeared under the cursor that clicked ✓
-    expect(bar()).toBeNull();
-    expect(queryButton()).not.toBeNull();
-    fireEvent.pointerMove(button()); // still on it: still not reopened
-    enter();
-    expect(bar()).toBeNull();
-
-    fireEvent.pointerLeave(button()); // off and back on: hover opens it again
-    enter();
-    expect(bar()).not.toBeNull();
-    wait(400); // past the ghost-tap guard
-    await act(async () => void fireEvent.click(cancel()));
-    enter();
-    expect(bar()).toBeNull();
-    fireEvent.pointerDown(button()); // a press always opens it
-    expect(bar()).not.toBeNull();
   });
 
   it("ignores a ghost tap on ✕ right after the opening touch", async () => {
