@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 import { uuidv7, type Change, type LogEntry } from "@pm/shared";
 import { DexieStore } from "../src/adapters/dexie-store.ts";
 import { MemorySessionStore, MemoryStore } from "../src/adapters/memory-store.ts";
+import { applyChangeLocally } from "../src/core/apply-change.ts";
+import { TimerActions } from "../src/core/actions.ts";
 import type { LocalStore, SessionStore } from "../src/core/ports.ts";
 
 const log = (day: string, seconds = 1, title = "t"): LogEntry => ({ id: uuidv7(), day, seconds, taskTitle: title });
@@ -127,6 +129,33 @@ describe.each(impls)("%s", (_name, makeStore, makeSessions) => {
     ).rejects.toThrow("boom");
     expect(await s.timerStart()).toBe(1);
     expect(await s.listLogsForDay("2026-11-05")).toEqual([]);
+  });
+
+  // Dexie only follows native awaits inside a transaction when its scope
+  // function is async; otherwise a write after a nested async helper escapes
+  // the transaction and write() rejects with PrematureCommitError (data saved,
+  // caller told it failed: the Timer's ✓ stayed greyed out).
+  it("a write after a nested async helper stays in the same transaction", async () => {
+    const s = makeStore();
+    const c: Change = { changeId: uuidv7(), op: "createLog", entry: log("2026-11-05", 10) };
+    const result = await s.write(async (tx) => {
+      await applyChangeLocally(tx, c);
+      await tx.setTimerStart(42);
+      return "done";
+    });
+    expect(result).toBe("done");
+    expect(await s.timerStart()).toBe(42);
+    expect(await s.listLogsForDay("2026-11-05")).toHaveLength(1);
+  });
+
+  it("timer ✓ (logAndRestart) resolves, also across midnight", async () => {
+    const s = makeStore();
+    const timer = new TimerActions({ store: s, sync: { requestSync: () => undefined } });
+    const now = new Date(2026, 10, 10, 0, 30).getTime(); // 00:30 local
+    await timer.restart(now - 3_600_000); // 23:30 the day before
+    const r = await timer.logAndRestart("Maintenance", now);
+    expect(r.ok && r.entries.map((e) => e.seconds)).toEqual([1800, 1800]);
+    expect(await s.timerStart()).toBe(now);
   });
 
   it("notifies subscribers after commits", async () => {

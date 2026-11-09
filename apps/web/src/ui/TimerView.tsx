@@ -88,8 +88,15 @@ export function TimerView() {
     e?.preventDefault();
     if (!text.trim() || saving) return;
     setSaving(true);
-    const result = await timer.logAndRestart(text); // logs + restart, atomically
-    setSaving(false);
+    let result: Awaited<ReturnType<typeof timer.logAndRestart>>;
+    try {
+      result = await timer.logAndRestart(text); // logs + restart, atomically
+    } catch (err) {
+      console.error(err);
+      result = { ok: false, error: "Could not save, try again" };
+    } finally {
+      setSaving(false); // never leave ✓ stuck greyed out
+    }
     if (result.ok) hide();
     else setError(result.error); // keep the bar and the text so nothing is lost
   };

@@ -52,7 +52,7 @@ export class DexieStore implements LocalStore, SessionStore {
 
   async write<T>(fn: (tx: LocalTx) => Promise<T>): Promise<T> {
     const db = this.db;
-    const result = await db.transaction("rw", [db.tasks, db.placements, db.logs, db.outbox, db.meta], () =>
+    const result = await db.transaction("rw", [db.tasks, db.placements, db.logs, db.outbox, db.meta], async () =>
       fn(this.tx()),
     );
     this.emit();

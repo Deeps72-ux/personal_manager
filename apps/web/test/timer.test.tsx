@@ -161,6 +161,20 @@ describe("TimerView", () => {
     expect((bar() as HTMLInputElement).value).toBe("Too quick");
   });
 
+  it("a save that throws re-enables ✓, keeps the text and shows an error", async () => {
+    const { timer } = await renderTimer(T0 - 60_000);
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(timer, "logAndRestart").mockRejectedValueOnce(new Error("PrematureCommitError"));
+    enter();
+    await logIt("Maintenance");
+    expect(screen.getByRole("alert").textContent).toMatch(/Could not save/);
+    expect(barText()).toBe("Maintenance");
+    expect((ok() as HTMLButtonElement).disabled).toBe(false);
+    await logIt("Maintenance"); // retry works
+    expect(bar()).toBeNull();
+    spy.mockRestore();
+  });
+
   it("keyboard: Space opens it; Enter in the bar logs", async () => {
     const { store } = await renderTimer(T0 - 3_000);
     fireEvent.keyDown(button(), { key: " " });
