@@ -44,12 +44,38 @@ describe("InsightsView", () => {
     const stats = () => [...document.querySelectorAll(".stat-value")].map((e) => e.textContent);
     expect(stats()).toEqual(["75%", "10%", "2"]); // averages (equal durations), count
 
-    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Previous week" })));
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Earlier" })));
     expect(screen.getByRole("img", { name: "Focus over time, 1 points" })).toBeTruthy();
     expect(stats()).toEqual(["25%", "60%", "1"]);
 
     await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Now" })));
     expect(screen.getByRole("img", { name: "Focus over time, 2 points" })).toBeTruthy();
+  });
+
+  it("zooms with the wheel / buttons and pans by dragging; presets come back", async () => {
+    await renderWith([{ t: new Date(2026, 10, 19, 9).getTime(), day: "2026-11-19", focus: 100, deviation: 0 }]);
+    const svg = () => screen.getByRole("img", { name: /^Focus over time/ });
+    const heading = () => document.querySelector(".insights-range")!.textContent;
+    const week = heading();
+
+    await act(async () => void fireEvent.wheel(svg(), { deltaY: -400, clientX: 300 })); // zoom in
+    expect(heading()).not.toBe(week);
+    expect(screen.getByRole("button", { name: "Week" }).getAttribute("aria-pressed")).toBe("false");
+
+    for (let i = 0; i < 12; i++) await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Zoom in" })));
+    expect(heading()).toMatch(/\d\d:\d\d:\d\d – \d\d:\d\d:\d\d$/); // seconds once narrow
+    expect(document.querySelector(".chart .axis:last-of-type")).toBeTruthy();
+
+    const before = heading();
+    await act(async () => {
+      fireEvent.pointerDown(svg(), { pointerId: 1, clientX: 300, button: 0, pointerType: "mouse" });
+      fireEvent.pointerMove(svg(), { pointerId: 1, clientX: 100, pointerType: "mouse" });
+      fireEvent.pointerUp(svg(), { pointerId: 1, clientX: 100, pointerType: "mouse" });
+    });
+    expect(heading()).not.toBe(before); // dragged left = later
+
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Week" })));
+    expect(heading()).toBe(week);
   });
 
   it("explains an empty period", async () => {

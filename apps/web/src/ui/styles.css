@@ -938,9 +938,29 @@ textarea {
 }
 
 /* ───────────── INSIGHTS: focus / deviation charts ───────────── */
-.insights-span {
-  max-width: 320px;
+.insights-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   margin-bottom: 0.8rem;
+}
+.insights-span {
+  flex: 1;
+  max-width: 320px;
+}
+.zoom-btns {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+.zoom-btns .icon {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+.calendar-head h2.insights-range {
+  font-size: 1rem;
+  min-width: 0;
+  flex: 0 1 auto;
 }
 .stat-row {
   display: grid;
@@ -965,10 +985,9 @@ textarea {
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
-.swipe {
+.charts {
   display: grid;
   gap: 10px;
-  touch-action: pan-y;
 }
 .chart {
   margin: 0;
@@ -994,7 +1013,20 @@ textarea {
 .chart svg {
   display: block;
   user-select: none;
-  cursor: crosshair;
+  -webkit-user-select: none;
+  cursor: grab;
+  /* Vertical swipes scroll the page; sideways drags and pinches go to the chart. */
+  touch-action: pan-y;
+}
+.chart svg:active {
+  cursor: grabbing;
+}
+.chart .gesture-surface {
+  fill: transparent;
+}
+.chart .xtick {
+  stroke: var(--border);
+  stroke-width: 1;
 }
 .chart .grid {
   stroke: var(--border);
