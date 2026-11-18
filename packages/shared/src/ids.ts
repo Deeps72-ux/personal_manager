@@ -38,3 +38,8 @@ const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 export function isUuidV7(value: string): boolean {
   return UUID_V7.test(value);
 }
+
+/** Creation time (Unix ms) stored in a UUIDv7's first 48 bits. */
+export function uuidv7Time(id: string): number {
+  return Number.parseInt(id.slice(0, 8) + id.slice(9, 13), 16);
+}

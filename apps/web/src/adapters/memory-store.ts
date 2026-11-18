@@ -101,6 +101,7 @@ function txFor(d: Data): LocalTx {
     getTask: async (id) => d.tasks.get(id),
     putTask: async (t) => void d.tasks.set(t.id, t),
     deleteTask: async (id) => void d.tasks.delete(id),
+    listTasks: async () => [...d.tasks.values()],
     getPlacement: async (id) => d.placements.get(id),
     putPlacement: async (p) => void d.placements.set(p.taskId, p),
     deletePlacement: async (id) => void d.placements.delete(id),

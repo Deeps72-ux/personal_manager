@@ -186,10 +186,39 @@ describe("TimerActions", () => {
     expect(await app.store.timerStart()).toBe(at(5, 9));
   });
 
+  it("scores FOCUS and DEVIATION against the priority list of that moment, on every row", async () => {
+    const app = setup();
+    for (const t of ["C", "B", "A"]) await app.tasks.create({ title: t }); // priority: A, B, C
+    await app.timer.restart(at(5, 23));
+    const r = await app.timer.logAndRestart("X;C;A;", at(6, 1));
+    if (!r.ok) throw new Error(r.error);
+    expect(r.entries).toHaveLength(2);
+    for (const e of r.entries) {
+      expect(e.focus).toBeCloseTo(100 / 3, 9);
+      expect(e.deviation).toBeCloseTo(23, 9);
+    }
+    expect(r.entries[0]!.id.slice(0, 13)).toBe(r.entries[1]!.id.slice(0, 13)); // same ✓ time
+
+    // Reordering later never rewrites past scores.
+    const b = (await app.store.listTasks()).find((t) => t.title === "B")!;
+    await app.priority.move(b.id, 0);
+    expect((await app.store.listLogsForDay("2026-11-06"))[0]).toMatchObject({ deviation: r.entries[1]!.deviation });
+  });
+
+  it("logs with no priority list get focus but no deviation; manual logs get neither", async () => {
+    const app = setup();
+    await app.timer.restart(at(5, 9));
+    const r = await app.timer.logAndRestart("Gym", at(5, 10));
+    expect(r.ok && r.entries[0]).toMatchObject({ focus: 100, deviation: null });
+    const m = await app.logs.add("2026-11-04", 60, "manual");
+    expect(m.ok && m.entry.focus).toBeUndefined();
+  });
+
   it("refuses blank text and purged days", async () => {
     const app = setup();
     await app.timer.restart(at(5, 9));
     expect(await app.timer.logAndRestart("   ", at(5, 10))).toMatchObject({ ok: false });
+    expect(await app.timer.logAndRestart(" ; ;", at(5, 10))).toMatchObject({ ok: false });
     await app.logs.purgeBefore("2026-11-06");
     expect(await app.timer.logAndRestart("x", at(5, 10))).toMatchObject({ ok: false });
     expect(await app.store.timerStart()).toBe(at(5, 9));

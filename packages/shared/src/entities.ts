@@ -39,15 +39,23 @@ export const PlacementSchema = z.strictObject({
 });
 export type Placement = z.infer<typeof PlacementSchema>;
 
+/** FOCUS / DEVIATION in percent. Missing or null = not scored (manual or older logs). */
+const Percent = z.number().min(0).max(100).nullish();
+
 /**
  * One LOG row. Holds a COPY of the task title, not a task id: deleting or
  * renaming a task never touches past logs.
+ * `focus` / `deviation` are computed on the device when TIMER ✓ is pressed,
+ * against the priority list of that moment, and never recomputed. They are
+ * optional so devices running an older version can still push logs.
  */
 export const LogEntrySchema = z.strictObject({
   id: IdSchema,
   day: DaySchema,
   seconds: z.int().min(1).max(DAY_SECONDS),
   taskTitle: Title,
+  focus: Percent,
+  deviation: Percent,
 });
 export type LogEntry = z.infer<typeof LogEntrySchema>;
 

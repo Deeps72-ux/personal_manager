@@ -5,3 +5,4 @@ export * from "./entities.ts";
 export * from "./ids.ts";
 export * from "./rank.ts";
 export * from "./sync.ts";
+export * from "./metrics.ts";

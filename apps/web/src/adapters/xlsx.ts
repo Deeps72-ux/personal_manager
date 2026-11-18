@@ -1,9 +1,11 @@
 import { formatSeconds, type LogEntry } from "@pm/shared";
+
+const pct = (v: number | null | undefined) => (v === null || v === undefined ? null : { value: v / 100, type: Number, format: "0.0%" });
 import type { FileSaver, SpreadsheetWriter } from "../core/ports.ts";
 
 const HEADER = { fontWeight: "bold" as const, backgroundColor: "#E8EAF6" };
 
-/** One sheet "Log": Day | Task | Seconds | Duration. */
+/** One sheet "Log": Day | Task | Seconds | Duration | Focus | Deviation (blank when not scored). */
 export class XlsxLogWriter implements SpreadsheetWriter {
   async writeLog(entries: readonly LogEntry[]): Promise<Blob> {
     // Loaded on first export only: keeps the app's startup bundle small.
@@ -14,17 +16,21 @@ export class XlsxLogWriter implements SpreadsheetWriter {
         { value: "Task", ...HEADER },
         { value: "Seconds", ...HEADER },
         { value: "Duration", ...HEADER },
+        { value: "Focus", ...HEADER },
+        { value: "Deviation", ...HEADER },
       ],
       ...entries.map((e) => [
         { value: e.day, type: String },
         { value: e.taskTitle, type: String },
         { value: e.seconds, type: Number, format: "#,##0" },
         { value: formatSeconds(e.seconds), type: String },
+        pct(e.focus),
+        pct(e.deviation),
       ]),
     ];
     return writeExcelFile(rows, {
       sheet: "Log",
-      columns: [{ width: 12 }, { width: 40 }, { width: 12 }, { width: 14 }],
+      columns: [{ width: 12 }, { width: 40 }, { width: 12 }, { width: 14 }, { width: 10 }, { width: 10 }],
       stickyRowsCount: 1,
     }).toBlob();
   }

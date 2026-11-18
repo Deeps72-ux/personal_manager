@@ -17,6 +17,9 @@ import {
   rankForTop,
   splitByDay,
   sumSeconds,
+  deviationPercent,
+  focusPercent,
+  splitActivities,
   uuidv7,
   type Change,
   type Day,
@@ -27,7 +30,7 @@ import {
 import { applyChangeLocally } from "./apply-change.ts";
 import { ValidationError } from "./errors.ts";
 import type { LocalStore, LocalTx, SyncTrigger } from "./ports.ts";
-import { sortedRanks } from "./views.ts";
+import { priorityOrder, sortedRanks } from "./views.ts";
 
 async function record(tx: LocalTx, c: NewChange): Promise<Change> {
   const change = { changeId: uuidv7(), ...c } as Change;
@@ -204,10 +207,15 @@ export class TimerActions {
    * midnight), and restart the count at `now`, all in one transaction.
    * The start is read INSIDE the transaction, so the same span can never
    * be logged twice. If any day fails a rule, nothing changes.
+   *
+   * Activities are the bar text split on ";". FOCUS and DEVIATION are scored
+   * here, against the priority list read in the same transaction, and stored
+   * on every row (all rows of one ✓ share the same score and the same id time).
    */
   async logAndRestart(text: string, now = Date.now()): Promise<TimerLogResult> {
     const title = text.trim().slice(0, LIMITS.titleMax);
-    if (!title) return { ok: false, error: "Type what you did" };
+    const activities = splitActivities(title);
+    if (activities.length === 0) return { ok: false, error: "Type what you did" };
 
     const result = await this.deps.store.write(async (tx): Promise<TimerLogResult> => {
       const start = (await tx.getTimerStart()) ?? now;
@@ -221,9 +229,12 @@ export class TimerActions {
           return { ok: false, error: `Over 24 hours on ${p.day}: only ${formatSeconds(86_400 - total)} left` };
         }
       }
+      const priority = priorityOrder(await tx.listTasks(), await tx.listPlacements()).map((t) => t.title);
+      const focus = focusPercent(activities);
+      const deviation = deviationPercent(activities, priority);
       const entries: LogEntry[] = [];
       for (const p of parts) {
-        const entry: LogEntry = { id: uuidv7(), day: p.day, seconds: p.seconds, taskTitle: title };
+        const entry: LogEntry = { id: uuidv7(now), day: p.day, seconds: p.seconds, taskTitle: title, focus, deviation };
         await record(tx, { op: "createLog", entry });
         entries.push(entry);
       }

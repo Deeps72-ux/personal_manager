@@ -22,6 +22,7 @@ export interface LocalTx {
   getTask(id: string): Promise<Task | undefined>;
   putTask(task: Task): Promise<void>;
   deleteTask(id: string): Promise<void>;
+  listTasks(): Promise<Task[]>;
 
   getPlacement(taskId: string): Promise<Placement | undefined>;
   putPlacement(p: Placement): Promise<void>;

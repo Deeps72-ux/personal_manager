@@ -11,8 +11,8 @@ const stub = (id: string, extra: Partial<Feature> = {}): Feature => ({
 });
 
 describe("feature registry", () => {
-  it("ships Tasks, Priority, Log and Timer, with a default that exists", () => {
-    expect(FEATURES.map((f) => f.id)).toEqual(["tasks", "priority", "log", "timer"]);
+  it("ships Tasks, Priority, Log, Timer and Insights, with a default that exists", () => {
+    expect(FEATURES.map((f) => f.id)).toEqual(["tasks", "priority", "log", "timer", "insights"]);
     expect(activeFeatures().some((f) => f.id === DEFAULT_FEATURE_ID)).toBe(true);
   });
 

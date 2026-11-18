@@ -44,7 +44,15 @@ export const task = (title: string, extra: Partial<Task> = {}): Task => ({
   ...extra,
 });
 
-export const log = (day: string, seconds: number, taskTitle: string): LogEntry => ({ id: uuidv7(), day, seconds, taskTitle });
+/** A manual (unscored) log, shaped exactly as the server returns it. */
+export const log = (day: string, seconds: number, taskTitle: string): LogEntry => ({
+  id: uuidv7(),
+  day,
+  seconds,
+  taskTitle,
+  focus: null,
+  deviation: null,
+});
 
 /** Build a Change without repeating `changeId` everywhere. */
 export const ch = (c: NewChange): Change => ({ changeId: uuidv7(), ...c });

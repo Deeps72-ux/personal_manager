@@ -7,7 +7,8 @@
  * To turn a feature off, set `enabled: false` (or remove its entry).
  */
 import type { JSX } from "react";
-import { CalendarIcon, ListIcon, StackIcon, TimerIcon } from "./icons.tsx";
+import { CalendarIcon, ChartIcon, ListIcon, StackIcon, TimerIcon } from "./icons.tsx";
+import { InsightsView } from "./InsightsView.tsx";
 import { LogView } from "./LogView.tsx";
 import { PriorityView } from "./PriorityView.tsx";
 import { TasksView } from "./TasksView.tsx";
@@ -39,6 +40,7 @@ export const FEATURES: readonly Feature[] = [
   },
   { id: "log", label: "Log", Icon: CalendarIcon, View: () => <LogView /> },
   { id: "timer", label: "Timer", Icon: TimerIcon, View: () => <TimerView /> },
+  { id: "insights", label: "Insights", Icon: ChartIcon, View: () => <InsightsView /> },
 ];
 
 /** Opened on first launch, or when the remembered feature no longer exists. */

@@ -936,3 +936,135 @@ textarea {
   width: 4px;
   background: hsl(var(--hue) 70% var(--card-accent-l));
 }
+
+/* ───────────── INSIGHTS: focus / deviation charts ───────────── */
+.insights-span {
+  max-width: 320px;
+  margin-bottom: 0.8rem;
+}
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 0.8rem;
+}
+.stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.8rem;
+  display: grid;
+  gap: 0.1rem;
+}
+.stat-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.stat-value {
+  font-size: 1.35rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.swipe {
+  display: grid;
+  gap: 10px;
+  touch-action: pan-y;
+}
+.chart {
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0 0.2rem;
+  overflow: hidden;
+}
+.chart figcaption {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0 0.9rem;
+}
+.chart-title {
+  font-weight: 650;
+}
+.chart-note {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.chart svg {
+  display: block;
+  user-select: none;
+  cursor: crosshair;
+}
+.chart .grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.chart .axis {
+  fill: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.chart .crosshair {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.chart .series-line {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.chart .series-dot {
+  fill: var(--primary);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.chart .value-label {
+  fill: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+}
+.insight-detail {
+  min-height: 4.2rem;
+  margin-top: 0.6rem;
+}
+.point-detail {
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 0.55rem 0.8rem;
+  font-size: 0.9rem;
+}
+.point-detail .muted {
+  color: var(--muted);
+}
+.point-title {
+  margin: 0.15rem 0;
+  overflow-wrap: anywhere;
+}
+.insight-table summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.insight-table {
+  overflow-x: auto;
+}
+.insight-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+.insight-table th,
+.insight-table td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}

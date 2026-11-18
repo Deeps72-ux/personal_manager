@@ -65,6 +65,7 @@ export class DexieStore implements LocalStore, SessionStore {
       getTask: (id) => db.tasks.get(id),
       putTask: async (t) => void (await db.tasks.put(t)),
       deleteTask: (id) => db.tasks.delete(id),
+      listTasks: () => db.tasks.toArray(),
       getPlacement: (id) => db.placements.get(id),
       putPlacement: async (p) => void (await db.placements.put(p)),
       deletePlacement: (id) => db.placements.delete(id),

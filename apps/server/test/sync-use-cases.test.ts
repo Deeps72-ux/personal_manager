@@ -85,6 +85,17 @@ describe("PushChanges handlers", () => {
     expect(r.results.every((x) => x.status === "applied")).toBe(true);
   });
 
+  it("log FOCUS / DEVIATION round-trip; a log without them (older device) comes back as null", async () => {
+    const c = testContainer();
+    const { userId } = await newUser(c);
+    const scored = { ...log("2026-11-05", 60, "X;C;A;"), focus: 100 / 3, deviation: 23 };
+    const { focus: _f, deviation: _d, ...legacy } = log("2026-11-05", 30, "old client");
+    const res = await c.useCases.push.execute(userId, [ch({ op: "createLog", entry: scored }), ch({ op: "createLog", entry: legacy })]);
+    expect(res.results.map((r) => r.status)).toEqual(["applied", "applied"]);
+    const snap = await c.useCases.pull.execute(userId, 0);
+    expect(snap.upserts.logEntries).toEqual(expect.arrayContaining([scored, { ...legacy, focus: null, deviation: null }]));
+  });
+
   it("purge deletes older logs, arms the guard, and the guard only moves forward", async () => {
     const c = testContainer();
     const { userId } = await newUser(c);

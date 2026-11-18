@@ -19,6 +19,7 @@ describe("Excel export", () => {
       ] as const) {
         await tx.putLog({ id: uuidv7(), day, seconds, taskTitle: title });
       }
+      await tx.putLog({ id: uuidv7(), day: "2026-11-03", seconds: 90, taskTitle: "X;C;A;", focus: 50, deviation: 12.5 });
     });
     let saved: { blob: Blob; name: string } | null = null;
     const exporter = new ExportLogs({
@@ -28,7 +29,7 @@ describe("Excel export", () => {
     });
 
     const r = await exporter.execute("2026-11-01", "2026-11-30");
-    expect(r).toEqual({ fileName: "log_2026-11-01_to_2026-11-30.xlsx", rows: 3 });
+    expect(r).toEqual({ fileName: "log_2026-11-01_to_2026-11-30.xlsx", rows: 4 });
     const file = saved as unknown as { blob: Blob; name: string };
     const sheets = (await readXlsxFile(Buffer.from(await file.blob.arrayBuffer()))) as unknown as {
       sheet: string;
@@ -36,10 +37,11 @@ describe("Excel export", () => {
     }[];
     expect(sheets.map((s) => s.sheet)).toEqual(["Log"]);
     expect(sheets[0]!.data).toEqual([
-      ["Day", "Task", "Seconds", "Duration"],
-      ["2026-11-01", "Sleep", 28800, "8h"],
-      ["2026-11-02", "Task7", 27, "27s"],
-      ["2026-11-30", "last day", 60, "1m"],
+      ["Day", "Task", "Seconds", "Duration", "Focus", "Deviation"],
+      ["2026-11-01", "Sleep", 28800, "8h", null, null],
+      ["2026-11-02", "Task7", 27, "27s", null, null],
+      ["2026-11-03", "X;C;A;", 90, "1m 30s", 0.5, 0.125],
+      ["2026-11-30", "last day", 60, "1m", null, null],
     ]);
   });
 

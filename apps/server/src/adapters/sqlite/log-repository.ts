@@ -8,6 +8,8 @@ const toLog = (r: Row): LogEntry => ({
   day: r.day as string,
   seconds: Number(r.seconds),
   taskTitle: r.task_title as string,
+  focus: r.focus === null || r.focus === undefined ? null : Number(r.focus),
+  deviation: r.deviation === null || r.deviation === undefined ? null : Number(r.deviation),
 });
 
 export class SqliteLogRepository implements LogRepository {
@@ -38,8 +40,10 @@ export class SqliteLogRepository implements LogRepository {
 
   async insert(userId: string, e: LogEntry) {
     this.db
-      .prepare("INSERT INTO log_entries (user_id, id, day, seconds, task_title) VALUES (?, ?, ?, ?, ?)")
-      .run(userId, e.id, e.day, e.seconds, e.taskTitle);
+      .prepare(
+        "INSERT INTO log_entries (user_id, id, day, seconds, task_title, focus, deviation) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(userId, e.id, e.day, e.seconds, e.taskTitle, e.focus ?? null, e.deviation ?? null);
   }
 
   async delete(userId: string, id: string) {
