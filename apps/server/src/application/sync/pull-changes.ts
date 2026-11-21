@@ -26,6 +26,7 @@ export class PullChanges {
         await repos.users.findById(userId),
       ];
       const purgedBefore = user?.purgedBefore ?? null;
+      const timerStart = user?.timerStart ?? null;
 
       if (cursor === 0 || cursor < floor || cursor > current) {
         return {
@@ -33,10 +34,12 @@ export class PullChanges {
           cursor: current,
           hasMore: false,
           purgedBefore,
+          timerStart,
           upserts: {
             tasks: await repos.tasks.listAll(userId),
             placements: await repos.placements.listAll(userId),
             logEntries: await repos.logs.listAll(userId),
+            priorityHistory: await repos.priorityHistory.listAll(userId),
           },
           deletes: { tasks: [], placements: [], logEntries: [] },
         };
@@ -49,7 +52,14 @@ export class PullChanges {
       // the transaction guarantees nothing for this user lies in between.
       const nextCursor = hasMore ? page.at(-1)!.seq : Math.max(cursor, current);
 
-      return { mode: "incremental", cursor: nextCursor, hasMore, purgedBefore, ...(await materialize(repos, userId, page)) };
+      return {
+        mode: "incremental",
+        cursor: nextCursor,
+        hasMore,
+        purgedBefore,
+        timerStart,
+        ...(await materialize(repos, userId, page)),
+      };
     });
   }
 }
@@ -69,6 +79,7 @@ async function materialize(repos: Repositories, userId: string, page: readonly C
       tasks: await repos.tasks.getMany(userId, ids("tasks", "upsert")),
       placements: await repos.placements.getMany(userId, ids("placements", "upsert")),
       logEntries: await repos.logs.getMany(userId, ids("log_entries", "upsert")),
+      priorityHistory: await repos.priorityHistory.getMany(userId, ids("priority_history", "upsert")),
     },
     deletes: {
       tasks: ids("tasks", "delete"),

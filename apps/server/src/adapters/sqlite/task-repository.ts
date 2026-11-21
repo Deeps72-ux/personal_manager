@@ -57,7 +57,11 @@ export class SqliteTaskRepository implements TaskRepository {
   }
 }
 
-const toPlacement = (r: Row): Placement => ({ taskId: r.task_id as string, rank: r.rank as string });
+const toPlacement = (r: Row): Placement => ({
+  taskId: r.task_id as string,
+  rank: r.rank as string,
+  queuedAt: r.queued_at === null || r.queued_at === undefined ? null : Number(r.queued_at),
+});
 
 export class SqlitePlacementRepository implements PlacementRepository {
   private readonly db: DatabaseSync;
@@ -89,11 +93,17 @@ export class SqlitePlacementRepository implements PlacementRepository {
   }
 
   async insert(userId: string, p: Placement) {
-    this.db.prepare("INSERT INTO placements (user_id, task_id, rank) VALUES (?, ?, ?)").run(userId, p.taskId, p.rank);
+    this.db
+      .prepare("INSERT INTO placements (user_id, task_id, rank, queued_at) VALUES (?, ?, ?, ?)")
+      .run(userId, p.taskId, p.rank, p.queuedAt ?? null);
   }
 
   async setRank(userId: string, taskId: string, rank: string) {
     this.db.prepare("UPDATE placements SET rank = ? WHERE user_id = ? AND task_id = ?").run(rank, userId, taskId);
+  }
+
+  async setQueuedAt(userId: string, taskId: string, queuedAt: number) {
+    this.db.prepare("UPDATE placements SET queued_at = ? WHERE user_id = ? AND task_id = ?").run(queuedAt, userId, taskId);
   }
 
   async delete(userId: string, taskId: string) {

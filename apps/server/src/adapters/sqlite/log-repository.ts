@@ -10,6 +10,8 @@ const toLog = (r: Row): LogEntry => ({
   taskTitle: r.task_title as string,
   focus: r.focus === null || r.focus === undefined ? null : Number(r.focus),
   deviation: r.deviation === null || r.deviation === undefined ? null : Number(r.deviation),
+  startMs: r.start_ms === null || r.start_ms === undefined ? null : Number(r.start_ms),
+  source: (r.source as LogEntry["source"]) ?? null,
 });
 
 export class SqliteLogRepository implements LogRepository {
@@ -41,13 +43,32 @@ export class SqliteLogRepository implements LogRepository {
   async insert(userId: string, e: LogEntry) {
     this.db
       .prepare(
-        "INSERT INTO log_entries (user_id, id, day, seconds, task_title, focus, deviation) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        `INSERT INTO log_entries (user_id, id, day, seconds, task_title, focus, deviation, start_ms, source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(userId, e.id, e.day, e.seconds, e.taskTitle, e.focus ?? null, e.deviation ?? null);
+      .run(
+        userId,
+        e.id,
+        e.day,
+        e.seconds,
+        e.taskTitle,
+        e.focus ?? null,
+        e.deviation ?? null,
+        e.startMs ?? null,
+        e.source ?? null,
+      );
   }
 
   async delete(userId: string, id: string) {
     this.db.prepare("DELETE FROM log_entries WHERE user_id = ? AND id = ?").run(userId, id);
+  }
+
+  async listTimedForDay(userId: string, day: string) {
+    return (
+      this.db
+        .prepare("SELECT * FROM log_entries WHERE user_id = ? AND day = ? AND start_ms IS NOT NULL ORDER BY start_ms, id")
+        .all(userId, day) as Row[]
+    ).map(toLog);
   }
 
   async deleteBefore(userId: string, before: string) {

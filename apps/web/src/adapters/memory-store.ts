@@ -2,38 +2,46 @@
  * In-memory LocalStore + SessionStore. Used by tests, and a living proof of
  * Liskov substitution: the same contract tests pass for this and for Dexie.
  */
-import type { Change, Day, LogEntry, Placement, Task } from "@pm/shared";
+import type { Change, Day, LogEntry, Placement, PrioritySnapshot, Task } from "@pm/shared";
 import type { LocalStore, LocalTx, Session, SessionStore } from "../core/ports.ts";
 
 interface Data {
   tasks: Map<string, Task>;
   placements: Map<string, Placement>;
   logs: Map<string, LogEntry>;
+  history: Map<string, PrioritySnapshot>;
   outbox: Change[];
   cursor: number;
   purgedBefore: Day | null;
   timerStart: number | null;
+  timerProvisional: boolean;
 }
 
 const empty = (): Data => ({
   tasks: new Map(),
   placements: new Map(),
   logs: new Map(),
+  history: new Map(),
   outbox: [],
   cursor: 0,
   purgedBefore: null,
   timerStart: null,
+  timerProvisional: false,
 });
 
 const clone = (d: Data): Data => ({
   tasks: new Map(d.tasks),
   placements: new Map(d.placements),
   logs: new Map(d.logs),
+  history: new Map(d.history),
   outbox: [...d.outbox],
   cursor: d.cursor,
   purgedBefore: d.purgedBefore,
   timerStart: d.timerStart,
+  timerProvisional: d.timerProvisional,
 });
+
+const byAtThenId = (a: PrioritySnapshot, b: PrioritySnapshot) => a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 const byDayThenId = (a: LogEntry, b: LogEntry) => (a.day === b.day ? (a.id < b.id ? -1 : 1) : a.day < b.day ? -1 : 1);
 
@@ -65,6 +73,9 @@ export class MemoryStore implements LocalStore {
   }
   async listLogsBetween(from: Day, to: Day) {
     return [...this.data.logs.values()].filter((l) => l.day >= from && l.day <= to).sort(byDayThenId);
+  }
+  async listHistory() {
+    return [...this.data.history.values()].sort(byAtThenId);
   }
   async listOutbox() {
     return [...this.data.outbox];
@@ -112,17 +123,24 @@ function txFor(d: Data): LocalTx {
       for (const [id, l] of d.logs) if (l.day < day) d.logs.delete(id);
     },
     listLogsForDay: async (day) => [...d.logs.values()].filter((l) => l.day === day).sort(byDayThenId),
+    putSnapshot: async (s) => void d.history.set(s.id, s),
+    listHistory: async () => [...d.history.values()].sort(byAtThenId),
     enqueue: async (c) => void d.outbox.push(c),
     listOutbox: async () => [...d.outbox],
     setCursor: async (c) => void (d.cursor = c),
     getPurgedBefore: async () => d.purgedBefore,
     setPurgedBefore: async (day) => void (d.purgedBefore = day),
     getTimerStart: async () => d.timerStart,
-    setTimerStart: async (ms) => void (d.timerStart = ms),
+    setTimerStart: async (ms, provisional = false) => {
+      d.timerStart = ms;
+      d.timerProvisional = provisional;
+    },
+    isTimerProvisional: async () => d.timerProvisional,
     clearSynced: async () => {
       d.tasks.clear();
       d.placements.clear();
       d.logs.clear();
+      d.history.clear();
     },
   };
 }

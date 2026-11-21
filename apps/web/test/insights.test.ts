@@ -4,7 +4,9 @@ import {
   MAX_VIEW_MS,
   MIN_VIEW_MS,
   clampWindow,
-  insightPoints,
+  deviationPoints,
+  focusPoints,
+  logDeviation,
   matchSpan,
   spanWindow,
   timeTicks,
@@ -22,15 +24,80 @@ const row = (t: number, day: string, seconds: number, focus: number | null, devi
   deviation,
 });
 
-describe("insightPoints", () => {
-  it("one point per ✓ press: rows split at midnight merge, unscored rows are skipped", () => {
+const DAY = "2026-11-20";
+const at = (h: number, m = 0) => new Date(2026, 10, 20, h, m).getTime();
+const timed = (title: string, from: number, minutes: number, source: "timer" | "manual" = "timer"): LogEntry => ({
+  id: uuidv7(from),
+  day: DAY,
+  seconds: minutes * 60,
+  taskTitle: title,
+  focus: null,
+  deviation: null,
+  startMs: from,
+  source,
+});
+
+describe("deviationPoints", () => {
+  it("older ✓ rows split at midnight merge; unscored older rows are skipped", () => {
     const t = new Date(2026, 10, 6, 1, 0).getTime();
-    const points = insightPoints([
-      row(t, "2026-11-05", 3600, 50, 10),
-      row(t, "2026-11-06", 3600, 50, 10),
-      row(t - 5_000_000, "2026-11-05", 60, null),
+    const points = deviationPoints(
+      [row(t, "2026-11-05", 3600, 50, 10), row(t, "2026-11-06", 3600, 50, 10), row(t - 5_000_000, "2026-11-05", 60, null)],
+      [],
+    );
+    expect(points).toEqual([{ key: `d:${t}|A;B;`, t, seconds: 7200, value: 10, title: "A;B;", detail: "✓ pressed" }]);
+  });
+
+  it("a timed log (timer or manual) is scored against the order(s) in force while it ran", () => {
+    const history = [
+      { at: at(10), titles: ["A", "X", "B", "C"] },
+      { at: at(10, 30), titles: ["X", "A", "B", "C"] },
+    ];
+    expect(logDeviation(timed("A", at(10), 60), history)).toBe(10);
+    expect(logDeviation(timed("A", at(10), 30, "manual"), history)).toBe(0);
+    expect(logDeviation(timed("X", at(10, 30), 30, "manual"), history)).toBe(0);
+    expect(logDeviation(timed("A", at(9), 30), history)).toBeNull(); // before the history began
+    const [p] = deviationPoints([timed("A", at(10), 60)], history);
+    expect(p).toMatchObject({ t: at(11), value: 10, title: "A", detail: "10:00 – 11:00" });
+  });
+});
+
+describe("focusPoints (per clock hour)", () => {
+  const now = at(23);
+  it("one activity all hour = 100%; every switch, and every gap, counts", () => {
+    const pts = focusPoints(
+      [
+        timed("A", at(9), 60), // 09:00–10:00: A only → 0 switches
+        timed("A", at(10), 20),
+        timed("B", at(10, 20), 20), // 10:00–10:40: A, B
+        timed("B", at(10, 50), 10), // 10:40–10:50 gap, then B again → A, B, gap, B = 3 switches
+      ],
+      null,
+      now,
+    );
+    expect(pts.map((p) => [p.title, p.value, p.detail])).toEqual([
+      ["09:00 – 10:00", 100, "0 switches"],
+      ["10:00 – 11:00", 25, "3 switches"],
     ]);
-    expect(points).toEqual([{ t, title: "A;B;", seconds: 7200, focus: 50, deviation: 10 }]);
+  });
+
+  it("A, gap, B = 2 switches; the same activity across two logs is no switch", () => {
+    const pts = focusPoints([timed("A", at(9), 20), timed("B", at(9, 40), 20), timed("C", at(11), 30), timed("c;", at(11, 30), 30)], null, now);
+    expect(pts.map((p) => p.value)).toEqual([100 / 3, 100]);
+  });
+
+  it("a log spanning hours scores in each; the running timer and the future are not scored yet", () => {
+    const pts = focusPoints([timed("A", at(9, 30), 60)], at(12), at(12, 30));
+    expect(pts.map((p) => [p.title, p.value])).toEqual([
+      ["09:00 – 10:00", 50], // gap 09:00–09:30, then A
+      ["10:00 – 11:00", 50], // A until 10:30, then gap
+    ]);
+    // Hour 12 is the running timer's: nothing scored there even with a log in it.
+    expect(focusPoints([timed("B", at(11, 50), 5)], at(12), at(12, 30)).map((p) => p.title)).toEqual(["11:00 – 12:00"]);
+  });
+
+  it("hours with only older untimed manual logs get no point", () => {
+    const old: LogEntry = { id: uuidv7(at(20)), day: DAY, seconds: 3600, taskTitle: "old", focus: null, deviation: null };
+    expect(focusPoints([old], null, now)).toEqual([]);
   });
 });
 
@@ -50,12 +117,10 @@ describe("spanWindow", () => {
 });
 
 describe("weightedMean", () => {
-  it("weights by logged seconds and ignores nulls", () => {
-    const p = (seconds: number, focus: number, deviation: number | null) => ({ t: 0, title: "", seconds, focus, deviation });
-    const pts = [p(3000, 100, 0), p(1000, 20, null)];
-    expect(weightedMean(pts, (x) => x.focus)).toBe(80);
-    expect(weightedMean(pts, (x) => x.deviation)).toBe(0);
-    expect(weightedMean([], (x) => x.focus)).toBeNull();
+  it("weights by logged seconds", () => {
+    const p = (seconds: number, value: number) => ({ key: String(value), t: 0, title: "", detail: "", seconds, value });
+    expect(weightedMean([p(3000, 100), p(1000, 20)])).toBe(80);
+    expect(weightedMean([])).toBeNull();
   });
 });
 

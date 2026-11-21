@@ -2,36 +2,90 @@
  * INSIGHTS: pure helpers that turn scored log rows into chart points and
  * time windows. No storage, no React.
  */
-import { uuidv7Time, type Day, type LogEntry } from "@pm/shared";
+import {
+  deviationOverTime,
+  uuidv7Time,
+  type Day,
+  type LogEntry,
+  type PriorityAt,
+} from "@pm/shared";
+import { hourlyFocus } from "./timeline.ts";
 import { pad2 } from "./views.ts";
 
 export type Span = "day" | "week" | "month";
 
+/** One point of a chart. */
 export interface InsightPoint {
-  /** When ✓ was pressed (Unix ms). */
+  /** Unique across both charts. */
+  key: string;
+  /** Where it sits on the time axis (Unix ms). */
   t: number;
-  title: string;
+  /** Weight for averages: logged seconds. */
   seconds: number;
-  focus: number;
-  deviation: number | null;
+  value: number;
+  /** What it is about: the activity, or the hour. */
+  title: string;
+  /** Second line of the details: "10:00 – 10:30" or "2 switches". */
+  detail: string;
+}
+
+const clock = (t: number) => {
+  const d = new Date(t);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+};
+
+/**
+ * DEVIATION of one log in percent, null if not scored. A log placed on the
+ * clock is scored against the priority order(s) in force while it ran
+ * (`history` sorted by time); an older log keeps the score stored on it.
+ */
+export function logDeviation(e: LogEntry, history: readonly PriorityAt[]): number | null {
+  if (e.startMs !== null && e.startMs !== undefined) {
+    return deviationOverTime(e.taskTitle, e.startMs, e.startMs + e.seconds * 1000, history);
+  }
+  return e.deviation ?? null;
 }
 
 /**
- * One point per ✓ press. A press that crossed midnight wrote several rows
- * with the same id time and score: they are merged (seconds added up).
- * Rows without a focus score (manual logs, older logs) are skipped.
+ * One DEVIATION point per scored log, at its end. Older TIMER rows of one ✓
+ * press that crossed midnight share an id time and are merged.
  */
-export function insightPoints(entries: readonly LogEntry[]): InsightPoint[] {
-  const byPress = new Map<string, InsightPoint>();
+export function deviationPoints(entries: readonly LogEntry[], history: readonly PriorityAt[]): InsightPoint[] {
+  const out = new Map<string, InsightPoint>();
   for (const e of entries) {
-    if (e.focus === null || e.focus === undefined) continue;
+    const value = logDeviation(e, history);
+    if (value === null) continue;
+    if (e.startMs !== null && e.startMs !== undefined) {
+      const end = e.startMs + e.seconds * 1000;
+      out.set(`d:${e.id}`, {
+        key: `d:${e.id}`,
+        t: end,
+        seconds: e.seconds,
+        value,
+        title: e.taskTitle,
+        detail: `${clock(e.startMs)} – ${clock(end)}`,
+      });
+      continue;
+    }
     const t = uuidv7Time(e.id);
-    const key = `${t}|${e.taskTitle}`;
-    const p = byPress.get(key);
+    const key = `d:${t}|${e.taskTitle}`;
+    const p = out.get(key);
     if (p) p.seconds += e.seconds;
-    else byPress.set(key, { t, title: e.taskTitle, seconds: e.seconds, focus: e.focus, deviation: e.deviation ?? null });
+    else out.set(key, { key, t, seconds: e.seconds, value, title: e.taskTitle, detail: "✓ pressed" });
   }
-  return [...byPress.values()].sort((a, b) => a.t - b.t);
+  return [...out.values()].sort((a, b) => a.t - b.t);
+}
+
+/** One FOCUS point per clock hour, in the middle of the part that was scored. */
+export function focusPoints(entries: readonly LogEntry[], timerStart: number | null, now: number): InsightPoint[] {
+  return hourlyFocus(entries, timerStart, now).map((h) => ({
+    key: `f:${h.hour}`,
+    t: (h.hour + h.end) / 2,
+    seconds: h.seconds,
+    value: h.focus,
+    title: `${clock(h.hour)} – ${clock(h.end)}`,
+    detail: `${h.switches} switch${h.switches === 1 ? "" : "es"}`,
+  }));
 }
 
 export interface Window {
@@ -61,13 +115,11 @@ export const localDay = (ms: number): Day => {
 };
 
 /** Average weighted by logged seconds; null if there is nothing to average. */
-export function weightedMean(points: readonly InsightPoint[], pick: (p: InsightPoint) => number | null): number | null {
+export function weightedMean(points: readonly InsightPoint[]): number | null {
   let sum = 0;
   let weight = 0;
   for (const p of points) {
-    const v = pick(p);
-    if (v === null) continue;
-    sum += v * p.seconds;
+    sum += p.value * p.seconds;
     weight += p.seconds;
   }
   return weight === 0 ? null : sum / weight;

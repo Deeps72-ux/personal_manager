@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DAY_SECONDS, daysInMonth, isValidDay, splitByDay, todayLocal } from "../src/day.ts";
+import { DAY_SECONDS, dayBounds, daysInMonth, isValidDay, splitByDay, todayLocal } from "../src/day.ts";
 import { fitsInDay, formatSeconds, parseSecondsInput, sumSeconds } from "../src/duration.ts";
 
 describe("day", () => {
@@ -82,13 +82,13 @@ describe("splitByDay", () => {
   const at = (d: number, h: number, m = 0, s = 0) => new Date(2026, 10, d, h, m, s).getTime();
 
   it("same day: one part", () => {
-    expect(splitByDay(at(5, 9), at(5, 10, 30))).toEqual([{ day: "2026-11-05", seconds: 5400 }]);
+    expect(splitByDay(at(5, 9), at(5, 10, 30))).toEqual([{ day: "2026-11-05", seconds: 5400, startMs: at(5, 9) }]);
   });
 
   it("across midnight: each day gets its own share", () => {
     expect(splitByDay(at(5, 23), at(6, 1, 15))).toEqual([
-      { day: "2026-11-05", seconds: 3600 },
-      { day: "2026-11-06", seconds: 4500 },
+      { day: "2026-11-05", seconds: 3600, startMs: at(5, 23) },
+      { day: "2026-11-06", seconds: 4500, startMs: at(6, 0) },
     ]);
   });
 
@@ -103,10 +103,19 @@ describe("splitByDay", () => {
     expect(splitByDay(at(5, 10), at(5, 9))).toEqual([]);
     expect(splitByDay(at(5, 9), at(5, 9) + 999)).toEqual([]);
     // ends 0.5 s after midnight: the next day's sliver is dropped
-    expect(splitByDay(at(5, 23, 59, 59), at(6, 0) + 500)).toEqual([{ day: "2026-11-05", seconds: 1 }]);
+    expect(splitByDay(at(5, 23, 59, 59), at(6, 0) + 500)).toEqual([{ day: "2026-11-05", seconds: 1, startMs: at(5, 23, 59, 59) }]);
   });
 
   it("parts never exceed 24 hours (clock-change days)", () => {
     for (const p of splitByDay(at(1, 0), at(30, 0))) expect(p.seconds).toBeLessThanOrEqual(DAY_SECONDS);
+  });
+});
+
+describe("dayBounds", () => {
+  it("is local midnight to the next local midnight", () => {
+    expect(dayBounds("2026-11-05")).toEqual({
+      start: new Date(2026, 10, 5).getTime(),
+      end: new Date(2026, 10, 6).getTime(),
+    });
   });
 });

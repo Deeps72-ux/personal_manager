@@ -32,10 +32,11 @@ export function todayLocal(now: Date = new Date()): Day {
   return `${y}-${m}-${d}`;
 }
 
-/** One day's share of a time span. */
+/** One day's share of a time span, starting at `startMs`. */
 export interface DayPart {
   day: Day;
   seconds: number;
+  startMs: number;
 }
 
 /**
@@ -51,8 +52,14 @@ export function splitByDay(startMs: number, endMs: number): DayPart[] {
     const nextMidnight = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
     const to = Math.min(nextMidnight, endMs);
     const seconds = Math.min(DAY_SECONDS, Math.floor((to - from) / 1000));
-    if (seconds >= 1) parts.push({ day: todayLocal(d), seconds });
+    if (seconds >= 1) parts.push({ day: todayLocal(d), seconds, startMs: from });
     from = to;
   }
   return parts;
+}
+
+/** [start, end) of a day in LOCAL time, epoch ms (23 or 25 h on clock-change days). */
+export function dayBounds(day: Day): { start: number; end: number } {
+  const [y, m, d] = day.split("-").map(Number) as [number, number, number];
+  return { start: new Date(y, m - 1, d).getTime(), end: new Date(y, m - 1, d + 1).getTime() };
 }

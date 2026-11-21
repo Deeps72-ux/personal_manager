@@ -1,12 +1,16 @@
 # Personal Manager
 
-A personal app with three sections, synced across a MacBook Air M1, a Windows 11 laptop and a Samsung Galaxy M31:
+A personal app with five sections, synced across a MacBook Air M1, a Windows 11 laptop and a Samsung Galaxy M31:
 
 | Section | What it does |
 |---|---|
 | **TASKS** | Add or remove task cards: title, optional description, optional due date |
-| **PRIORITY** | All cards in one stack. Drag and drop sets the order; new cards go on top; the order syncs |
-| **LOG** | Calendar → a day → rows of `seconds → task title`. A day can't go over 24 h (UI-only rule) |
+| **PRIORITY** | All cards in one stack. Drag and drop sets the order; new cards go on top; the order syncs. Top right: the **waiting queue**. Drag a card onto it to park it (it leaves the list). Tapping it shows a pipeline, newest on top and oldest at the bottom. Each task goes from blue to red over an hour, then pulses faster; the icon glows by the oldest task. Dragging the bottom task out deletes it |
+| **LOG** | Calendar → a day → pick a task, type a duration. The app proposes the earliest free slot that holds it whole, and you accept it. Time covered by another log or by the running timer is never free |
+| **TIMER** | One timer shared by every device. ✓ logs the time since the last restart as **one** activity (`Activity;`; the `;` is added if missing, and nothing may follow it). ✕ restarts without logging |
+| **INSIGHTS** | **Focus** per clock hour = 100 / (1 + activity switches); an empty stretch counts as a switch. **Deviation** per log = 100·(rank − 1)/(n + 1) against the scoring order in force while it ran (top task, then the queue oldest-first, then the rest), averaged by time when the order changed mid-log |
+
+When two devices that were apart log the same time, a timer log trims a manual one (on the server). Two timer logs, or two manual logs, are shown to you to pick which one to keep.
 
 It also exports logs to Excel for a date range and deletes logs older than a chosen date. All deletes are hard deletes.
 

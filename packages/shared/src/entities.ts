@@ -32,22 +32,39 @@ export const TaskSchema = z.strictObject({
 });
 export type Task = z.infer<typeof TaskSchema>;
 
-/** Where a task sits in the PRIORITY list (separate from Task: SRP). */
+const EpochMs = z.int().min(0).max(2 ** 48 - 1);
+
+/**
+ * Where a task sits in the PRIORITY list (separate from Task: SRP).
+ * `queuedAt`: when the task was dropped into the WAITING QUEUE (epoch ms).
+ * A queued task leaves the visible priority list but keeps its rank; for
+ * scoring it ranks right after the top task. Missing/null = not queued.
+ */
 export const PlacementSchema = z.strictObject({
   taskId: IdSchema,
   rank: RankSchema,
+  queuedAt: EpochMs.nullish(),
 });
 export type Placement = z.infer<typeof PlacementSchema>;
 
 /** FOCUS / DEVIATION in percent. Missing or null = not scored (manual or older logs). */
 const Percent = z.number().min(0).max(100).nullish();
 
+/** Who made a log: the TIMER (✓) or a manual entry in the LOG calendar. */
+export const LogSourceSchema = z.enum(["timer", "manual"]);
+export type LogSource = z.infer<typeof LogSourceSchema>;
+
 /**
  * One LOG row. Holds a COPY of the task title, not a task id: deleting or
  * renaming a task never touches past logs.
- * `focus` / `deviation` are computed on the device when TIMER ✓ is pressed,
- * against the priority list of that moment, and never recomputed. They are
- * optional so devices running an older version can still push logs.
+ *
+ * `startMs` + `seconds` place the log on the clock: it covers
+ * [startMs, startMs + seconds·1000). Logs from older versions have no
+ * `startMs` (and no `source`).
+ *
+ * `focus` / `deviation` are the scores older versions stored on TIMER ✓.
+ * New logs leave them null: deviation is worked out from the priority
+ * history, focus per clock hour.
  */
 export const LogEntrySchema = z.strictObject({
   id: IdSchema,
@@ -56,6 +73,8 @@ export const LogEntrySchema = z.strictObject({
   taskTitle: Title,
   focus: Percent,
   deviation: Percent,
+  startMs: EpochMs.nullish(),
+  source: LogSourceSchema.nullish(),
 });
 export type LogEntry = z.infer<typeof LogEntrySchema>;
 
@@ -68,3 +87,15 @@ export const TaskPatchSchema = z
   })
   .refine((p) => Object.keys(p).length > 0, "patch must change at least one field");
 export type TaskPatch = z.infer<typeof TaskPatchSchema>;
+
+/**
+ * PRIORITY HISTORY: the scoring order (titles, best first) from `at` until
+ * the next snapshot. Append-only, synced, never edited: a log is scored
+ * against the order(s) in force while it ran.
+ */
+export const PrioritySnapshotSchema = z.strictObject({
+  id: IdSchema,
+  at: EpochMs,
+  titles: z.array(Title).max(2000),
+});
+export type PrioritySnapshot = z.infer<typeof PrioritySnapshotSchema>;

@@ -3,6 +3,7 @@ import type { Repositories } from "../../ports/repositories.ts";
 import type { UnitOfWork } from "../../ports/unit-of-work.ts";
 import { SqliteChangeLogRepository } from "./change-log-repository.ts";
 import { SqliteLogRepository } from "./log-repository.ts";
+import { SqlitePriorityHistoryRepository } from "./priority-history-repository.ts";
 import { SqliteSessionRepository } from "./session-repository.ts";
 import { SqlitePlacementRepository, SqliteTaskRepository } from "./task-repository.ts";
 import { SqliteUserRepository } from "./user-repository.ts";
@@ -26,6 +27,7 @@ export class SqliteUnitOfWork implements UnitOfWork {
       tasks: new SqliteTaskRepository(db),
       placements: new SqlitePlacementRepository(db),
       logs: new SqliteLogRepository(db),
+      priorityHistory: new SqlitePriorityHistoryRepository(db),
       changeLog: new SqliteChangeLogRepository(db),
     };
   }

@@ -1100,3 +1100,221 @@ textarea {
   border-bottom: 1px solid var(--border);
   font-variant-numeric: tabular-nums;
 }
+
+/* ───────────── PRIORITY: waiting queue ───────────── */
+.priority-head {
+  position: sticky;
+  top: calc(3.9rem + env(safe-area-inset-top));
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.35rem 0 0.5rem;
+  margin-bottom: 0.4rem;
+  background: var(--bg);
+}
+.priority-title {
+  flex: 1;
+  min-width: 0;
+}
+.queue-btn {
+  --q-color: var(--muted);
+  --q-glow: 0px;
+  position: relative;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--q-color);
+  background: var(--surface);
+  border: 2px solid color-mix(in srgb, var(--q-color) 55%, var(--border));
+  box-shadow: 0 0 var(--q-glow) color-mix(in srgb, var(--q-color) 70%, transparent);
+  transition: transform 0.15s ease, box-shadow 0.4s ease, border-color 0.4s ease, color 0.4s ease;
+  cursor: pointer;
+}
+.queue-btn.hot {
+  background: color-mix(in srgb, var(--q-color) 14%, var(--surface));
+}
+.queue-btn.pulsing {
+  animation: queue-pulse var(--q-pulse) ease-in-out infinite;
+}
+.queue-btn.armed {
+  border-style: dashed;
+  transform: scale(1.08);
+}
+.queue-btn.over {
+  transform: scale(1.22);
+  border-color: var(--primary);
+  border-style: solid;
+}
+.queue-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  color: #fff;
+  background: var(--q-color);
+}
+@keyframes queue-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 var(--q-glow) color-mix(in srgb, var(--q-color) 70%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 calc(var(--q-glow) * 2.2) var(--q-color);
+  }
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(10 10 20 / 0.45);
+}
+.modal {
+  width: min(460px, 100%);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  padding: 1rem;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-lift);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+.modal-head h2 {
+  font-size: 1.1rem;
+}
+.pipeline {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 1.4rem;
+}
+.pipe-item {
+  --q-color: hsl(220 75% 56%);
+  position: relative;
+}
+/* the pipe between two tasks, pointing down */
+.pipe-item + .pipe-item::before {
+  content: "↓";
+  position: absolute;
+  top: -1.35rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 1rem;
+  line-height: 1.2rem;
+  color: var(--muted);
+}
+.queue-card {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 12px;
+  color: #fff;
+  background: var(--q-color);
+  box-shadow: 0 0 var(--q-glow) color-mix(in srgb, var(--q-color) 60%, transparent);
+  transition: background 0.6s ease;
+}
+.queue-card.pulsing {
+  animation: queue-pulse var(--q-pulse) ease-in-out infinite;
+}
+.queue-card-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.queue-card-wait {
+  flex: none;
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+.pipe-item.bottom {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.pipe-item.bottom .queue-card {
+  outline: 2px solid color-mix(in srgb, var(--q-color) 40%, transparent);
+  outline-offset: 3px;
+}
+.pipe-item.lifting {
+  z-index: 2;
+  cursor: grabbing;
+}
+.queue-outlet {
+  margin-top: 0.9rem;
+  padding: 0.8rem;
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--muted);
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.queue-outlet.armed {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.queue-outlet.over {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-style: solid;
+}
+
+/* ───────────── overlapping logs ───────────── */
+.conflict {
+  margin-bottom: 1rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 9%, var(--surface));
+}
+.conflict p {
+  margin: 0 0 0.6rem;
+}
+.conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.conflict-keep {
+  text-align: left;
+}
+
+/* ───────────── LOG: placed on the clock ───────────── */
+.daymeter-timer {
+  margin: 0.35rem 0 0;
+}
+.entry-source {
+  font-size: 0.8rem;
+}
+.secondsform.proposal .row {
+  margin-top: 0.6rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .queue-btn.pulsing,
+  .queue-card.pulsing {
+    animation: none;
+  }
+}

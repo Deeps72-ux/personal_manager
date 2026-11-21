@@ -3,7 +3,7 @@
  * it survives app restarts and works with no network at all.
  */
 import { Dexie, type Table } from "dexie";
-import type { Change, Day, LogEntry, Placement, Task } from "@pm/shared";
+import type { Change, Day, LogEntry, Placement, PrioritySnapshot, Task } from "@pm/shared";
 import type { LocalStore, LocalTx, Session, SessionStore } from "../core/ports.ts";
 
 interface OutboxRow {
@@ -20,6 +20,7 @@ class Db extends Dexie {
   tasks!: Table<Task, string>;
   placements!: Table<Placement, string>;
   logs!: Table<LogEntry, string>;
+  history!: Table<PrioritySnapshot, string>;
   outbox!: Table<OutboxRow, number>;
   meta!: Table<MetaRow, string>;
 
@@ -32,11 +33,14 @@ class Db extends Dexie {
       outbox: "++seq, changeId",
       meta: "key",
     });
+    this.version(2).stores({ history: "id, at" });
   }
 }
 
-const SYNCED = ["tasks", "placements", "logs"] as const;
+const SYNCED = ["tasks", "placements", "logs", "history"] as const;
 const TIMER_KEY = "timerStartedAt";
+const TIMER_PROVISIONAL_KEY = "timerProvisional";
+const byAtThenId = (a: PrioritySnapshot, b: PrioritySnapshot) => a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 export class DexieStore implements LocalStore, SessionStore {
   private readonly db: Db;
@@ -52,7 +56,7 @@ export class DexieStore implements LocalStore, SessionStore {
 
   async write<T>(fn: (tx: LocalTx) => Promise<T>): Promise<T> {
     const db = this.db;
-    const result = await db.transaction("rw", [db.tasks, db.placements, db.logs, db.outbox, db.meta], async () =>
+    const result = await db.transaction("rw", [db.tasks, db.placements, db.logs, db.history, db.outbox, db.meta], async () =>
       fn(this.tx()),
     );
     this.emit();
@@ -74,13 +78,20 @@ export class DexieStore implements LocalStore, SessionStore {
       deleteLog: (id) => db.logs.delete(id),
       deleteLogsBefore: async (day) => void (await db.logs.where("day").below(day).delete()),
       listLogsForDay: (day) => db.logs.where("day").equals(day).sortBy("id"),
+      putSnapshot: async (s) => void (await db.history.put(s)),
+      listHistory: async () => (await db.history.toArray()).sort(byAtThenId),
       enqueue: async (change) => void (await db.outbox.add({ changeId: change.changeId, change })),
       listOutbox: async () => (await db.outbox.orderBy("seq").toArray()).map((r) => r.change),
       setCursor: async (c) => void (await db.meta.put({ key: "cursor", value: c })),
       getPurgedBefore: async () => ((await db.meta.get("purgedBefore"))?.value as Day | null) ?? null,
       setPurgedBefore: async (day) => void (await db.meta.put({ key: "purgedBefore", value: day })),
       getTimerStart: async () => ((await db.meta.get(TIMER_KEY))?.value as number | undefined) ?? null,
-      setTimerStart: async (ms) => void (await db.meta.put({ key: TIMER_KEY, value: ms })),
+      setTimerStart: async (ms, provisional = false) =>
+        void (await db.meta.bulkPut([
+          { key: TIMER_KEY, value: ms },
+          { key: TIMER_PROVISIONAL_KEY, value: provisional },
+        ])),
+      isTimerProvisional: async () => (await db.meta.get(TIMER_PROVISIONAL_KEY))?.value === true,
       clearSynced: async () => {
         await Promise.all(SYNCED.map((t) => db[t].clear()));
       },
@@ -99,6 +110,9 @@ export class DexieStore implements LocalStore, SessionStore {
   async listLogsBetween(from: Day, to: Day) {
     const rows = await this.db.logs.where("day").between(from, to, true, true).toArray();
     return rows.sort((a, b) => (a.day === b.day ? (a.id < b.id ? -1 : 1) : a.day < b.day ? -1 : 1));
+  }
+  async listHistory() {
+    return (await this.db.history.toArray()).sort(byAtThenId);
   }
   async listOutbox() {
     return (await this.db.outbox.orderBy("seq").toArray()).map((r) => r.change);
@@ -119,8 +133,15 @@ export class DexieStore implements LocalStore, SessionStore {
   }
   async wipe() {
     const db = this.db;
-    await db.transaction("rw", [db.tasks, db.placements, db.logs, db.outbox, db.meta], async () => {
-      await Promise.all([db.tasks.clear(), db.placements.clear(), db.logs.clear(), db.outbox.clear(), db.meta.clear()]);
+    await db.transaction("rw", [db.tasks, db.placements, db.logs, db.history, db.outbox, db.meta], async () => {
+      await Promise.all([
+        db.tasks.clear(),
+        db.placements.clear(),
+        db.logs.clear(),
+        db.history.clear(),
+        db.outbox.clear(),
+        db.meta.clear(),
+      ]);
     });
     this.emit();
   }

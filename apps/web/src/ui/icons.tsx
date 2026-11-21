@@ -27,6 +27,13 @@ export const StackIcon = () => (
   </svg>
 );
 
+/** A funnel-like pipeline: tasks go in at the top, the oldest comes out at the bottom. */
+export const QueueIcon = () => (
+  <svg {...props}>
+    <path d="M4 4h16l-5 7v5l-6 4v-9z" />
+  </svg>
+);
+
 export const CalendarIcon = () => (
   <svg {...props}>
     <rect x="3" y="5" width="18" height="16" rx="2" />

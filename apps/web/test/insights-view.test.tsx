@@ -3,17 +3,30 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { uuidv7 } from "@pm/shared";
 import { MemoryStore } from "../src/adapters/memory-store.ts";
+import { localDay } from "../src/core/insights.ts";
 import { InsightsView } from "../src/ui/InsightsView.tsx";
 import { ServicesProvider, type Services } from "../src/ui/services.tsx";
 
 const NOW = new Date(2026, 10, 19, 18, 0).getTime(); // Thu 19 Nov 2026, local
 
-async function renderWith(rows: { t: number; day: string; focus: number; deviation: number | null }[]) {
+/** Hour-long TIMER logs of "A" starting at `starts`; A is #1 of 2 until `swap`, then #2 of 2. */
+async function renderWith(starts: number[], swap = Infinity) {
   const store = new MemoryStore();
   await store.write(async (tx) => {
-    for (const r of rows) {
-      await tx.putLog({ id: uuidv7(r.t), day: r.day, seconds: 600, taskTitle: "A;X;", focus: r.focus, deviation: r.deviation });
+    for (const t of starts) {
+      await tx.putLog({
+        id: uuidv7(t),
+        day: localDay(t),
+        seconds: 3600,
+        taskTitle: "A",
+        focus: null,
+        deviation: null,
+        startMs: t,
+        source: "timer",
+      });
     }
+    await tx.putSnapshot({ id: uuidv7(0), at: 0, titles: ["A", "B"] });
+    if (swap !== Infinity) await tx.putSnapshot({ id: uuidv7(swap), at: swap, titles: ["B", "A"] });
   });
   render(
     <ServicesProvider value={{ store } as unknown as Services}>
@@ -33,27 +46,33 @@ afterEach(() => {
 });
 
 describe("InsightsView", () => {
-  it("plots this week's ✓ logs and moves back and forth", async () => {
-    await renderWith([
-      { t: new Date(2026, 10, 18, 10).getTime(), day: "2026-11-18", focus: 50, deviation: 20 },
-      { t: new Date(2026, 10, 19, 9).getTime(), day: "2026-11-19", focus: 100, deviation: 0 },
-      { t: new Date(2026, 10, 10, 9).getTime(), day: "2026-11-10", focus: 25, deviation: 60 },
-    ]);
-    expect(screen.getByRole("img", { name: "Focus over time, 2 points" })).toBeTruthy();
+  it("plots this week's hours and logs, and moves back and forth", async () => {
+    const swap = new Date(2026, 10, 19, 0).getTime();
+    await renderWith(
+      [
+        new Date(2026, 10, 18, 10).getTime(), // A was top: 0%
+        new Date(2026, 10, 19, 9, 30).getTime(), // after the swap: A is #2 of 2 → 33.3%
+        new Date(2026, 10, 10, 9).getTime(), // last week
+      ],
+      swap,
+    );
+    // Focus: 18th 10–11 (no switch), 19th 9–10 and 10–11 (half gap) → 3 hours this week.
+    expect(screen.getByRole("img", { name: "Focus over time, 3 points" })).toBeTruthy();
     expect(screen.getByRole("img", { name: "Deviation over time, 2 points" })).toBeTruthy();
     const stats = () => [...document.querySelectorAll(".stat-value")].map((e) => e.textContent);
-    expect(stats()).toEqual(["75%", "10%", "2"]); // averages (equal durations), count
+    // focus weighted by logged seconds: (3600·100 + 1800·50 + 1800·50) / 7200 = 75
+    expect(stats()).toEqual(["75%", "16.7%", "2"]);
 
     await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Earlier" })));
     expect(screen.getByRole("img", { name: "Focus over time, 1 points" })).toBeTruthy();
-    expect(stats()).toEqual(["25%", "60%", "1"]);
+    expect(stats()).toEqual(["100%", "0%", "1"]);
 
     await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Now" })));
-    expect(screen.getByRole("img", { name: "Focus over time, 2 points" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Focus over time, 3 points" })).toBeTruthy();
   });
 
   it("zooms with the wheel / buttons and pans by dragging; presets come back", async () => {
-    await renderWith([{ t: new Date(2026, 10, 19, 9).getTime(), day: "2026-11-19", focus: 100, deviation: 0 }]);
+    await renderWith([new Date(2026, 10, 19, 9).getTime()]);
     const svg = () => screen.getByRole("img", { name: /^Focus over time/ });
     const heading = () => document.querySelector(".insights-range")!.textContent;
     const week = heading();
@@ -80,6 +99,6 @@ describe("InsightsView", () => {
 
   it("explains an empty period", async () => {
     await renderWith([]);
-    expect(screen.getByText(/No TIMER logs in this period/)).toBeTruthy();
+    expect(screen.getByText(/Nothing scored in this period/)).toBeTruthy();
   });
 });

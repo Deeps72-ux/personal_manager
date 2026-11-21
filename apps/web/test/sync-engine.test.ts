@@ -9,7 +9,7 @@ import { startServer, type RunningServer } from "@pm/test-server";
 import { HttpRemoteApi } from "../src/adapters/http-api.ts";
 import { MemorySessionStore, MemoryStore } from "../src/adapters/memory-store.ts";
 import { SseChannel } from "../src/adapters/sse-channel.ts";
-import { LogActions, PriorityActions, TaskActions } from "../src/core/actions.ts";
+import { LogActions, PriorityActions, TaskActions, TimerActions } from "../src/core/actions.ts";
 import { AuthService, SessionHolder } from "../src/core/auth.ts";
 import { SyncEngine } from "../src/core/sync-engine.ts";
 import { priorityOrder } from "../src/core/views.ts";
@@ -48,6 +48,7 @@ function device(name: string, opts: { baseUrl?: string; realtime?: boolean } = {
     tasks: new TaskActions({ store, sync }),
     priority: new PriorityActions({ store, sync }),
     logs: new LogActions({ store, sync }),
+    timer: new TimerActions({ store, sync }),
     unauthorized: () => unauthorized,
     order: async () => priorityOrder(await store.listTasks(), await store.listPlacements()).map((t) => t.title),
     state: async () => ({
@@ -108,7 +109,7 @@ describe("SyncEngine against the real server", () => {
     await offline.tasks.create({ title: "made offline" });
     await offline.logs.add("2026-11-05", 60, "made offline");
     await offline.sync.syncNow();
-    expect(offline.sync.getStatus()).toMatchObject({ state: "offline", pending: 2 });
+    expect(offline.sync.getStatus()).toMatchObject({ state: "offline", pending: 3 }); // task + its history snapshot + log
     expect(await offline.order()).toEqual(["made offline"]); // UI still shows it
 
     // "Back online": same local data + outbox, real server address.
@@ -201,7 +202,7 @@ describe("SyncEngine against the real server", () => {
     await phone!.sync.syncNow();
     expect(phone!.sync.getStatus().state).toBe("unauthorized");
     expect(phone!.unauthorized()).toBe(1);
-    expect(await phone!.store.listOutbox()).toHaveLength(1);
+    expect((await phone!.store.listOutbox()).map((c) => c.op)).toEqual(["createTask", "recordPriority"]);
 
     // Re-sign-in (same user) keeps data and the outbox flushes.
     await phone!.auth.signIn(username, "password123");
@@ -248,5 +249,46 @@ describe("SyncEngine against the real server", () => {
     await expect(d.auth.signIn("ab", "password123")).rejects.toThrow("at least 3");
     const off = device("y", { baseUrl: "http://127.0.0.1:9" });
     await expect(off.auth.signIn("someone", "password123")).rejects.toThrow("Can't reach the server");
+  });
+
+  it("ONE TIMER: a restart on one device is the start on the others; a fresh device never resets it", async () => {
+    const username = uniq();
+    const [phone, mac] = await signedIn(username, "phone", "mac");
+    await phone!.timer.ensureStart(1_000_000); // a real start kept from before the update
+    await settle(phone!, mac!);
+    expect(await mac!.store.timerStart()).toBe(1_000_000);
+
+    // A brand-new device makes up a start of "now" before it has synced: it must not win.
+    const tablet = device("tablet");
+    await tablet.auth.signIn(username, "password123");
+    await tablet.timer.ensureStart(null);
+    tablet.sync.start();
+    await settle(tablet, phone!, mac!);
+    expect(await tablet.store.timerStart()).toBe(1_000_000);
+    expect(await phone!.store.timerStart()).toBe(1_000_000);
+
+    // ✓ on the mac: the phone's timer restarts too, and the log is placed on the clock.
+    const now = new Date(2026, 10, 20, 12).getTime();
+    await mac!.timer.restart(now - 3600_000);
+    const r = await mac!.timer.logAndRestart("Gym;", now);
+    expect(r.ok).toBe(true);
+    await settle(mac!, phone!, tablet);
+    expect(await phone!.store.timerStart()).toBe(now);
+    expect((await phone!.store.listLogsForDay("2026-11-20")).map((l) => [l.taskTitle, l.startMs, l.source])).toEqual([
+      ["Gym", now - 3600_000, "timer"],
+    ]);
+    for (const d of [phone!, mac!, tablet]) d.sync.stop();
+  });
+
+  it("the priority history and the waiting queue reach every device", async () => {
+    const [phone, mac] = await signedIn(uniq(), "phone", "mac");
+    for (const t of ["C", "B", "A"]) await phone!.tasks.create({ title: t });
+    const c = (await phone!.store.listTasks()).find((t) => t.title === "C")!;
+    await phone!.priority.enqueue(c.id);
+    await settle(phone!, mac!);
+    expect((await mac!.store.listPlacements()).find((p) => p.taskId === c.id)?.queuedAt).toBeTypeOf("number");
+    expect((await mac!.store.listHistory()).at(-1)!.titles).toEqual(["A", "C", "B"]);
+    expect(await mac!.store.listHistory()).toEqual(await phone!.store.listHistory());
+    for (const d of [phone!, mac!]) d.sync.stop();
   });
 });

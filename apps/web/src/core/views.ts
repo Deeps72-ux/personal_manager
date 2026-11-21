@@ -3,7 +3,7 @@
  */
 import { compareRanked, daysInMonth, sumSeconds, type Day, type LogEntry, type Placement, type Task } from "@pm/shared";
 
-/** PRIORITY list: tasks in rank order (id tie-break), same on every device. */
+/** Every placed task in rank order (id tie-break), queued ones included. Same on every device. */
 export function priorityOrder(tasks: readonly Task[], placements: readonly Placement[]): Task[] {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   return placements
@@ -11,6 +11,43 @@ export function priorityOrder(tasks: readonly Task[], placements: readonly Place
     .sort(compareRanked)
     .map((r) => byId.get(r.id))
     .filter((t): t is Task => t !== undefined);
+}
+
+export const isQueued = (p: Placement): boolean => p.queuedAt !== null && p.queuedAt !== undefined;
+
+export interface QueuedTask {
+  task: Task;
+  queuedAt: number;
+}
+
+/**
+ * The PRIORITY screen's two parts: the visible list (rank order) and the
+ * WAITING QUEUE (oldest first: the first one in is the first one out).
+ */
+export function splitPriority(
+  tasks: readonly Task[],
+  placements: readonly Placement[],
+): { list: Task[]; queue: QueuedTask[] } {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const list = priorityOrder(
+    tasks,
+    placements.filter((p) => !isQueued(p)),
+  );
+  const queue = placements
+    .filter(isQueued)
+    .map((p) => ({ task: byId.get(p.taskId), queuedAt: p.queuedAt! }))
+    .filter((q): q is QueuedTask => q.task !== undefined)
+    .sort((a, b) => a.queuedAt - b.queuedAt || (a.task.id < b.task.id ? -1 : 1));
+  return { list, queue };
+}
+
+/**
+ * The order scores are taken against: the top task, then the queue (oldest
+ * first: all of it is high priority), then the rest of the list.
+ */
+export function scoringOrder(tasks: readonly Task[], placements: readonly Placement[]): Task[] {
+  const { list, queue } = splitPriority(tasks, placements);
+  return [...list.slice(0, 1), ...queue.map((q) => q.task), ...list.slice(1)];
 }
 
 export function sortedRanks(placements: readonly Placement[]): string[] {
@@ -82,27 +119,5 @@ export function formatMonth(year: number, month: number, locale?: string): strin
   });
 }
 
-export type InsertTitleResult =
-  | { ok: true; text: string; cursor: number }
-  | { ok: false; reason: "present" | "too-long" };
-
-/** True if `piece` already appears in `text` as a whole entry (not inside a longer title). */
-function hasEntry(text: string, piece: string): boolean {
-  for (let i = text.indexOf(piece); i !== -1; i = text.indexOf(piece, i + 1)) {
-    if (i === 0 || text[i - 1] === ";" || /\s/.test(text[i - 1]!)) return true;
-  }
-  return false;
-}
-
-/**
- * TIMER bar: put `title;` at the cursor. Refused if that title is already
- * in the bar (the user removes it by hand) or the result would exceed `max`.
- */
-export function insertTitle(text: string, cursor: number, title: string, max: number): InsertTitleResult {
-  const piece = `${title};`;
-  if (hasEntry(text, piece)) return { ok: false, reason: "present" };
-  const at = Math.max(0, Math.min(cursor, text.length));
-  const next = text.slice(0, at) + piece + text.slice(at);
-  if (next.length > max) return { ok: false, reason: "too-long" };
-  return { ok: true, text: next, cursor: at + piece.length };
-}
+/** TIMER chip: the bar becomes exactly `title;` (one activity per log). */
+export const chipText = (title: string): string => `${title.trim()};`;

@@ -36,6 +36,20 @@ export async function applyChangeLocally(tx: LocalTx, change: Change): Promise<v
     case "deleteLog":
       await tx.deleteLog(change.logId);
       return;
+    case "queueTask": {
+      const p = await tx.getPlacement(change.taskId);
+      if (p && (p.queuedAt === null || p.queuedAt === undefined)) await tx.putPlacement({ ...p, queuedAt: change.queuedAt });
+      return;
+    }
+    case "recordPriority":
+      await tx.putSnapshot(change.snapshot);
+      return;
+    case "setTimerStart": {
+      // The latest start wins, in any order (same rule as the server).
+      const current = await tx.getTimerStart();
+      await tx.setTimerStart(current === null ? change.startMs : Math.max(current, change.startMs));
+      return;
+    }
     case "purgeLogsBefore": {
       const purged = await tx.getPurgedBefore();
       const guard = purged && purged > change.before ? purged : change.before;

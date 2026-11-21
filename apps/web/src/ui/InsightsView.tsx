@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { formatPercent, formatSeconds } from "@pm/shared";
 import {
-  insightPoints,
+  deviationPoints,
+  focusPoints,
   localDay,
   matchSpan,
   panWindow,
@@ -24,8 +25,6 @@ const SPANS: { id: Span; label: string }[] = [
   { id: "month", label: "Month" },
 ];
 
-const keyOf = (p: InsightPoint) => `${p.t}|${p.title}`;
-
 /** Rows are fetched per whole month around the view, so panning re-queries rarely. */
 function fetchRange(w: Window): { from: string; to: string } {
   const s = new Date(w.start);
@@ -36,8 +35,12 @@ function fetchRange(w: Window): { from: string; to: string } {
   };
 }
 
+const EMPTY = { focus: [] as InsightPoint[], deviation: [] as InsightPoint[] };
+
 /**
- * INSIGHTS: FOCUS and DEVIATION of every TIMER ✓ over time.
+ * INSIGHTS over time:
+ *   FOCUS per clock hour = 100 / (1 + activity switches in that hour),
+ *   DEVIATION per log, against the priority order(s) in force while it ran.
  * Day / Week / Month are presets; the time axis itself zooms and pans freely
  * (mouse wheel / drag, trackpad, pinch / swipe), down to one second.
  */
@@ -46,8 +49,21 @@ export function InsightsView() {
   const [hover, setHover] = useState<string | null>(null);
 
   const { from, to } = fetchRange(view);
-  const all = useLive(async (s) => insightPoints(await s.store.listLogsBetween(from, to)), [from, to]) ?? [];
-  const points = all.filter((p) => p.t >= view.start && p.t < view.end);
+  const data =
+    useLive(
+      async (s) => {
+        const [entries, history, timerStart] = await Promise.all([
+          s.store.listLogsBetween(from, to),
+          s.store.listHistory(),
+          s.store.timerStart(),
+        ]);
+        return { focus: focusPoints(entries, timerStart, Date.now()), deviation: deviationPoints(entries, history) };
+      },
+      [from, to],
+    ) ?? EMPTY;
+  const inView = (p: InsightPoint) => p.t >= view.start && p.t < view.end;
+  const hours = data.focus.filter(inView);
+  const logs = data.deviation.filter(inView);
   const preset = matchSpan(view);
   const width = view.end - view.start;
 
@@ -78,9 +94,7 @@ export function InsightsView() {
     e.preventDefault();
   };
 
-  const focusAvg = weightedMean(points, (p) => p.focus);
-  const devAvg = weightedMean(points, (p) => p.deviation);
-  const active = hover === null ? null : (all.find((p) => keyOf(p) === hover) ?? null);
+  const active = hover === null ? null : ([...data.focus, ...data.deviation].find((p) => p.key === hover) ?? null);
   const nowVisible = Date.now() >= view.start && Date.now() < view.end;
 
   return (
@@ -117,21 +131,28 @@ export function InsightsView() {
       </div>
 
       <div className="stat-row">
-        <Stat label="Avg focus" value={focusAvg} />
-        <Stat label="Avg deviation" value={devAvg} />
+        <Stat label="Avg focus" value={weightedMean(hours)} />
+        <Stat label="Avg deviation" value={weightedMean(logs)} />
         <div className="stat">
           <span className="stat-label">Logs</span>
-          <span className="stat-value">{points.length}</span>
+          <span className="stat-value">{logs.length}</span>
         </div>
       </div>
 
       <div className="charts">
-        <Chart title="Focus" note="100% = one activity" all={all} pick={(p) => p.focus} view={view} setView={setView} hover={hover} onHover={setHover} />
+        <Chart
+          title="Focus"
+          note="per hour · 100% = no switches"
+          points={data.focus}
+          view={view}
+          setView={setView}
+          hover={hover}
+          onHover={setHover}
+        />
         <Chart
           title="Deviation"
-          note="0% = only your top priority"
-          all={all}
-          pick={(p) => p.deviation}
+          note="per log · 0% = your top priority"
+          points={data.deviation}
           view={view}
           setView={setView}
           hover={hover}
@@ -143,34 +164,64 @@ export function InsightsView() {
       </p>
 
       <div className="insight-detail" aria-live="polite">
-        {active ? <PointDetail p={active} /> : points.length > 0 && <span className="hint">Hover or tap a point for details.</span>}
+        {active ? (
+          <PointDetail p={active} />
+        ) : (
+          (hours.length > 0 || logs.length > 0) && <span className="hint">Hover or tap a point for details.</span>
+        )}
       </div>
 
-      {points.length === 0 && (
-        <p className="hint">No TIMER logs in this period. Scores are taken each time you press ✓ on the Timer.</p>
+      {hours.length === 0 && logs.length === 0 && (
+        <p className="hint">
+          Nothing scored in this period. Each log gets a deviation from the priority order while it ran; each clock
+          hour you logged gets a focus score from how often you switched.
+        </p>
       )}
 
-      {points.length > 0 && (
+      {logs.length > 0 && (
         <details className="insight-table">
-          <summary>Show as table</summary>
+          <summary>Logs as a table</summary>
           <table>
             <thead>
               <tr>
-                <th>When</th>
-                <th>Activities</th>
+                <th>Ended</th>
+                <th>Activity</th>
                 <th>Time</th>
-                <th>Focus</th>
                 <th>Deviation</th>
               </tr>
             </thead>
             <tbody>
-              {points.map((p) => (
-                <tr key={keyOf(p)}>
+              {logs.map((p) => (
+                <tr key={p.key}>
                   <td>{when(p.t)}</td>
                   <td>{p.title}</td>
                   <td>{formatSeconds(p.seconds)}</td>
-                  <td>{formatPercent(p.focus)}</td>
-                  <td>{p.deviation === null ? "—" : formatPercent(p.deviation)}</td>
+                  <td>{formatPercent(p.value)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+      {hours.length > 0 && (
+        <details className="insight-table">
+          <summary>Hours as a table</summary>
+          <table>
+            <thead>
+              <tr>
+                <th>Day</th>
+                <th>Hour</th>
+                <th>Switches</th>
+                <th>Focus</th>
+              </tr>
+            </thead>
+            <tbody>
+              {hours.map((p) => (
+                <tr key={p.key}>
+                  <td>{dayOf(p.t)}</td>
+                  <td>{p.title}</td>
+                  <td>{p.detail}</td>
+                  <td>{formatPercent(p.value)}</td>
                 </tr>
               ))}
             </tbody>
@@ -201,6 +252,8 @@ const when = (t: number) =>
     second: "2-digit",
   });
 
+const dayOf = (t: number) => new Date(t).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+
 function Stat({ label, value }: { label: string; value: number | null }) {
   return (
     <div className="stat">
@@ -211,14 +264,15 @@ function Stat({ label, value }: { label: string; value: number | null }) {
 }
 
 function PointDetail({ p }: { p: InsightPoint }) {
+  const isFocus = p.key.startsWith("f:");
   return (
     <div className="point-detail">
-      <strong>{when(p.t)}</strong>
-      <span className="muted"> · {formatSeconds(p.seconds)}</span>
-      <div className="point-title">{p.title}</div>
+      <strong>{isFocus ? `${dayOf(p.t)}, ${p.title}` : when(p.t)}</strong>
+      <span className="muted"> · {formatSeconds(p.seconds)} logged</span>
+      <div className="point-title">{isFocus ? p.detail : p.title}</div>
       <div>
-        Focus <strong>{formatPercent(p.focus)}</strong> · Deviation{" "}
-        <strong>{p.deviation === null ? "—" : formatPercent(p.deviation)}</strong>
+        {isFocus ? "Focus" : "Deviation"} <strong>{formatPercent(p.value)}</strong>
+        {!isFocus && <span className="muted"> · {p.detail}</span>}
       </div>
     </div>
   );
@@ -247,16 +301,15 @@ const TICK_SPACING = 78; // px per x label
 interface ChartProps {
   title: string;
   note: string;
-  all: readonly InsightPoint[];
-  pick: (p: InsightPoint) => number | null;
+  points: readonly InsightPoint[];
   view: Window;
   setView: (w: Window) => void;
   hover: string | null;
   onHover: (key: string | null) => void;
 }
 
-/** One series, y fixed at 0–100%, x = time of the ✓ press, zoomable / pannable. */
-function Chart({ title, note, all, pick, view, setView, hover, onHover }: ChartProps) {
+/** One series, y fixed at 0–100%, x = time, zoomable / pannable. */
+function Chart({ title, note, points, view, setView, hover, onHover }: ChartProps) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
   const plotW = Math.max(10, width - PAD.left - PAD.right);
@@ -266,12 +319,12 @@ function Chart({ title, note, all, pick, view, setView, hover, onHover }: ChartP
   const y = (v: number) => PAD.top + (1 - v / 100) * plotH;
 
   // Visible points, plus one on each side so the line runs off the edges.
-  const scored = all.map((p) => ({ p, v: pick(p) })).filter((m): m is { p: InsightPoint; v: number } => m.v !== null);
+  const scored = points.map((p) => ({ p, v: p.value }));
   const firstIn = scored.findIndex((m) => m.p.t >= view.start);
   const lo = firstIn === -1 ? scored.length - 1 : Math.max(0, firstIn - 1);
   let hi = scored.findIndex((m) => m.p.t >= view.end);
   hi = hi === -1 ? scored.length : hi + 1;
-  const marks = scored.slice(Math.max(0, lo), hi).map((m) => ({ key: keyOf(m.p), v: m.v, t: m.p.t, cx: x(m.p.t), cy: y(m.v) }));
+  const marks = scored.slice(Math.max(0, lo), hi).map((m) => ({ key: m.p.key, v: m.v, t: m.p.t, cx: x(m.p.t), cy: y(m.v) }));
   const inView = marks.filter((m) => m.t >= view.start && m.t < view.end);
   const path = marks.map((m, k) => `${k === 0 ? "M" : "L"}${m.cx.toFixed(1)},${m.cy.toFixed(1)}`).join("");
   const ticks = timeTicks(view, Math.floor(plotW / TICK_SPACING));

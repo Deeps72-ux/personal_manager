@@ -20,6 +20,19 @@ describe("Excel export", () => {
         await tx.putLog({ id: uuidv7(), day, seconds, taskTitle: title });
       }
       await tx.putLog({ id: uuidv7(), day: "2026-11-03", seconds: 90, taskTitle: "X;C;A;", focus: 50, deviation: 12.5 });
+      // A log on the clock: scored from the history (B is #2 of 3 → 25%).
+      const start = new Date(2026, 10, 4, 9, 0, 0).getTime();
+      await tx.putLog({
+        id: uuidv7(),
+        day: "2026-11-04",
+        seconds: 1800,
+        taskTitle: "B",
+        focus: null,
+        deviation: null,
+        startMs: start,
+        source: "timer",
+      });
+      await tx.putSnapshot({ id: uuidv7(0), at: 0, titles: ["A", "B", "C"] });
     });
     let saved: { blob: Blob; name: string } | null = null;
     const exporter = new ExportLogs({
@@ -29,7 +42,7 @@ describe("Excel export", () => {
     });
 
     const r = await exporter.execute("2026-11-01", "2026-11-30");
-    expect(r).toEqual({ fileName: "log_2026-11-01_to_2026-11-30.xlsx", rows: 4 });
+    expect(r).toEqual({ fileName: "log_2026-11-01_to_2026-11-30.xlsx", rows: 5 });
     const file = saved as unknown as { blob: Blob; name: string };
     const sheets = (await readXlsxFile(Buffer.from(await file.blob.arrayBuffer()))) as unknown as {
       sheet: string;
@@ -37,11 +50,12 @@ describe("Excel export", () => {
     }[];
     expect(sheets.map((s) => s.sheet)).toEqual(["Log"]);
     expect(sheets[0]!.data).toEqual([
-      ["Day", "Task", "Seconds", "Duration", "Focus", "Deviation"],
-      ["2026-11-01", "Sleep", 28800, "8h", null, null],
-      ["2026-11-02", "Task7", 27, "27s", null, null],
-      ["2026-11-03", "X;C;A;", 90, "1m 30s", 0.5, 0.125],
-      ["2026-11-30", "last day", 60, "1m", null, null],
+      ["Day", "Start", "End", "Task", "Seconds", "Duration", "Deviation"],
+      ["2026-11-01", null, null, "Sleep", 28800, "8h", null],
+      ["2026-11-02", null, null, "Task7", 27, "27s", null],
+      ["2026-11-03", null, null, "X;C;A;", 90, "1m 30s", 0.125],
+      ["2026-11-04", "09:00:00", "09:30:00", "B", 1800, "30m", 0.25],
+      ["2026-11-30", null, null, "last day", 60, "1m", null],
     ]);
   });
 

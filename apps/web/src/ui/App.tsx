@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { User } from "@pm/shared";
 import { AuthScreen } from "./AuthScreen.tsx";
+import { ConflictBanner } from "./ConflictBanner.tsx";
 import { activeFeatures, resolveFeatureId } from "./features.tsx";
 import { useLive, useServices } from "./services.tsx";
 import { SyncBadge } from "./SyncBadge.tsx";
@@ -20,7 +21,7 @@ const readTab = (): string => {
 };
 
 export function App() {
-  const { auth, holder, sync } = useServices();
+  const { auth, holder, sync, priority } = useServices();
   const [user, setUser] = useState<User | null | "loading">("loading");
   const [expired, setExpired] = useState(false);
 
@@ -41,8 +42,18 @@ export function App() {
   useEffect(() => {
     if (!user || user === "loading") return;
     sync.start();
-    return () => sync.stop();
-  }, [user, sync]);
+    // After each finished sync the local copy is current: make sure the
+    // PRIORITY HISTORY ends with today's order (first run, older devices).
+    let last = sync.getStatus().state;
+    const off = sync.subscribe((s) => {
+      if (s.state === "idle" && last !== "idle") void priority.reconcileHistory().catch((err) => console.error(err));
+      last = s.state;
+    });
+    return () => {
+      off();
+      sync.stop();
+    };
+  }, [user, sync, priority]);
 
   if (user === "loading") return <div className="splash" aria-busy="true" />;
   if (!user) return <AuthScreen expired={expired} onDone={() => setExpired(false)} />;
@@ -82,6 +93,7 @@ function Shell({ user }: { user: User }) {
       </header>
 
       <main className="content">
+        <ConflictBanner />
         {FEATURE_LIST.map(({ id, View }) => id === tab && <View key={id} navigate={choose} />)}
       </main>
 

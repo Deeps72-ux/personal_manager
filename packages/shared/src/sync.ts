@@ -14,6 +14,7 @@ import {
   IdSchema,
   LogEntrySchema,
   PlacementSchema,
+  PrioritySnapshotSchema,
   RankSchema,
   TaskPatchSchema,
   TaskSchema,
@@ -45,6 +46,12 @@ export const ChangeSchema = z.discriminatedUnion("op", [
   z.strictObject({ ...base, op: z.literal("deleteLog"), logId: IdSchema }),
   /** Hard delete every log with day < `before`; also arms the purge guard. */
   z.strictObject({ ...base, op: z.literal("purgeLogsBefore"), before: DaySchema }),
+  /** Drop a task into the WAITING QUEUE (it leaves the visible priority list). */
+  z.strictObject({ ...base, op: z.literal("queueTask"), taskId: IdSchema, queuedAt: z.int().min(0) }),
+  /** Append one PRIORITY HISTORY snapshot. */
+  z.strictObject({ ...base, op: z.literal("recordPriority"), snapshot: PrioritySnapshotSchema }),
+  /** The one shared TIMER restarted at `startMs`. The latest start wins. */
+  z.strictObject({ ...base, op: z.literal("setTimerStart"), startMs: z.int().min(0) }),
 ]);
 export type Change = z.infer<typeof ChangeSchema>;
 export type ChangeOp = Change["op"];
@@ -87,16 +94,19 @@ const Cursor = z.int().min(0);
  *              (offline > 30 days) or 0 (first sync): REPLACE all local
  *              synced data with `upserts` (deletes are empty).
  * hasMore:     pull again with the new cursor to get the next page.
+ * timerStart:  start of the one shared TIMER (null: no device has set it yet).
  */
 export const PullResponseSchema = z.strictObject({
   mode: z.enum(["incremental", "snapshot"]),
   cursor: Cursor,
   hasMore: z.boolean(),
   purgedBefore: DaySchema.nullable(),
+  timerStart: z.int().min(0).nullable(),
   upserts: z.strictObject({
     tasks: z.array(TaskSchema),
     placements: z.array(PlacementSchema),
     logEntries: z.array(LogEntrySchema),
+    priorityHistory: z.array(PrioritySnapshotSchema),
   }),
   deletes: z.strictObject({
     tasks: z.array(IdSchema),

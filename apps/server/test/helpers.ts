@@ -52,6 +52,8 @@ export const log = (day: string, seconds: number, taskTitle: string): LogEntry =
   taskTitle,
   focus: null,
   deviation: null,
+  startMs: null,
+  source: null,
 });
 
 /** Build a Change without repeating `changeId` everywhere. */

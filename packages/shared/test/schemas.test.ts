@@ -86,7 +86,8 @@ describe("PullResponseSchema", () => {
       cursor: 42,
       hasMore: false,
       purgedBefore: null,
-      upserts: { tasks: [], placements: [], logEntries: [] },
+      timerStart: null,
+      upserts: { tasks: [], placements: [], logEntries: [], priorityHistory: [] },
       deletes: { tasks: [], placements: [], logEntries: [] },
     };
     expect(PullResponseSchema.parse(r)).toEqual(r);

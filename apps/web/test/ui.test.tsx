@@ -29,7 +29,8 @@ function fakeApi(): RemoteApi & { pushed: Change[] } {
     cursor: 1,
     hasMore: false,
     purgedBefore: null,
-    upserts: { tasks: [], placements: [], logEntries: [] },
+    timerStart: null,
+    upserts: { tasks: [], placements: [], logEntries: [], priorityHistory: [] },
     deletes: { tasks: [], placements: [], logEntries: [] },
   };
   return {
@@ -117,10 +118,16 @@ describe("PWA UI", () => {
     await user.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(screen.queryByText("first")).toBeNull());
 
-    await waitFor(() => expect(api.pushed.map((c) => c.op)).toEqual(["createTask", "createTask", "deleteTask"]));
+    await waitFor(() =>
+      expect(api.pushed.map((c) => c.op).filter((op) => op !== "recordPriority")).toEqual([
+        "createTask",
+        "createTask",
+        "deleteTask",
+      ]),
+    );
   });
 
-  it("LOG: calendar → day → pick card → seconds; blocks over 24h; delete entry", async () => {
+  it("LOG: calendar → day → pick card → duration → accept the proposed slot; refuses what cannot fit", async () => {
     const { user, services } = renderApp();
     await signUp(user);
     await services.tasks.create({ title: "Sleep" });
@@ -132,26 +139,79 @@ describe("PWA UI", () => {
     await user.click(screen.getByRole("button", { name: "Sleep" }));
     await user.type(screen.getByLabelText("Seconds for Sleep"), "8*60*60");
     expect(screen.getByText("= 28,800 s (8h)")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(screen.getByRole("button", { name: "Find a slot" }));
+    expect(await screen.findByText(/00:00 – 08:00/)).toBeTruthy(); // asks first
+    expect(await services.store.listLogsForDay(todayLocal())).toEqual([]);
+    await user.click(screen.getByRole("button", { name: "Accept" }));
     const entries = () => within(document.querySelector(".entries") as HTMLElement);
-    await waitFor(() => expect(entries().getByText("28,800 s")).toBeTruthy());
+    await waitFor(() => expect(entries().getByText("00:00–08:00")).toBeTruthy());
 
     await user.click(screen.getByRole("button", { name: "Task7" }));
     await user.type(screen.getByLabelText("Seconds for Task7"), "17h");
-    expect(screen.getByText(/Over 24 hours: only 57,600 s/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add" })).toHaveProperty("disabled", true);
+    expect(screen.getByText(/No free slot that long: the longest is 16h/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Find a slot" })).toHaveProperty("disabled", true);
     await user.clear(screen.getByLabelText("Seconds for Task7"));
-    await user.type(screen.getByLabelText("Seconds for Task7"), "27");
-    await user.click(screen.getByRole("button", { name: "Add" }));
-    await waitFor(() => expect(entries().getByText("27 s")).toBeTruthy());
-    expect(screen.getByText(/28,827 s/)).toBeTruthy();
+    await user.type(screen.getByLabelText("Seconds for Task7"), "30m");
+    await user.click(screen.getByRole("button", { name: "Find a slot" }));
+    await user.click(await screen.findByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(entries().getByText("08:00–08:30")).toBeTruthy());
+    expect(screen.getByText("8h 30m")).toBeTruthy(); // logged so far
 
     await user.click(screen.getByRole("button", { name: "Delete Task7 entry" }));
-    await waitFor(() => expect(entries().queryByText("27 s")).toBeNull());
+    await waitFor(() => expect(entries().queryByText("08:00–08:30")).toBeNull());
 
     // back to the calendar: today shows its total
     await user.click(screen.getByRole("button", { name: "Back to calendar" }));
     expect(await screen.findByRole("gridcell", { name: `${todayLocal()}, 8h logged` })).toBeTruthy();
+  });
+
+  it("PRIORITY: the waiting queue opens as a pipeline, oldest at the bottom, and the icon heats up", async () => {
+    const { user, services } = renderApp();
+    await signUp(user);
+    for (const t of ["C", "B", "A"]) await services.tasks.create({ title: t });
+    const id = async (title: string) => (await services.store.listTasks()).find((t) => t.title === title)!.id;
+    await services.priority.enqueue(await id("B"), Date.now() - 125 * 60_000); // waiting over 2 h
+    await services.priority.enqueue(await id("C"), Date.now() - 60_000);
+
+    await user.click(nav().getByRole("button", { name: /Priority/ }));
+    await screen.findByLabelText("1. A");
+    expect([...document.querySelectorAll(".stack-item")].map((li) => li.getAttribute("aria-label"))).toEqual(["1. A"]);
+    const icon = screen.getByRole("button", { name: /Waiting queue: 2 tasks, oldest waiting 2h/ });
+    expect(icon.className).toMatch(/pulsing/); // past one hour
+
+    await user.click(icon);
+    const dialog = within(screen.getByRole("dialog", { name: "Waiting queue" }));
+    expect([...document.querySelectorAll(".queue-card-title")].map((e) => e.textContent)).toEqual(["C", "B"]);
+    expect(dialog.getByLabelText(/^B, first in line/)).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("two overlapping timer logs (devices that were apart): the user keeps one", async () => {
+    const { user, services } = renderApp();
+    await signUp(user);
+    const day = todayLocal();
+    const [y, m, d] = day.split("-").map(Number) as [number, number, number];
+    const at = (h: number) => new Date(y, m - 1, d, h).getTime();
+    const timerLog = (id: string, title: string, start: number) => ({
+      id,
+      day,
+      seconds: 3600,
+      taskTitle: title,
+      focus: null,
+      deviation: null,
+      startMs: start,
+      source: "timer" as const,
+    });
+    await services.store.write(async (tx) => {
+      await tx.putLog(timerLog("0190a000-0000-7000-8000-000000000001", "Phone run", at(1)));
+      await tx.putLog(timerLog("0190a000-0000-7000-8000-000000000002", "Laptop run", at(1) + 1800_000));
+    });
+    const alert = await screen.findByText(/Two timer logs overlap/);
+    expect(alert).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Keep Laptop run/ }));
+    await waitFor(() => expect(screen.queryByText(/overlap/)).toBeNull());
+    expect((await services.store.listLogsForDay(day)).map((l) => l.taskTitle)).toEqual(["Laptop run"]);
   });
 
   it("export and purge tools", async () => {

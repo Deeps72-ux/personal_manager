@@ -16,7 +16,7 @@ describe("PushChanges handlers", () => {
     expect((await c.useCases.push.execute(userId, [change])).results[0]!.status).toBe("applied"); // resend
     const snap = await c.useCases.pull.execute(userId, 0);
     expect(snap.upserts.tasks).toEqual([t]);
-    expect(snap.upserts.placements).toEqual([{ taskId: t.id, rank: "a0" }]);
+    expect(snap.upserts.placements).toEqual([{ taskId: t.id, rank: "a0", queuedAt: null }]);
   });
 
   it("applies a batch in order (create then rename in one push)", async () => {
@@ -93,7 +93,7 @@ describe("PushChanges handlers", () => {
     const res = await c.useCases.push.execute(userId, [ch({ op: "createLog", entry: scored }), ch({ op: "createLog", entry: legacy })]);
     expect(res.results.map((r) => r.status)).toEqual(["applied", "applied"]);
     const snap = await c.useCases.pull.execute(userId, 0);
-    expect(snap.upserts.logEntries).toEqual(expect.arrayContaining([scored, { ...legacy, focus: null, deviation: null }]));
+    expect(snap.upserts.logEntries).toEqual(expect.arrayContaining([scored, { ...legacy, focus: null, deviation: null, startMs: null, source: null }]));
   });
 
   it("purge deletes older logs, arms the guard, and the guard only moves forward", async () => {

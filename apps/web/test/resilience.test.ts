@@ -28,7 +28,8 @@ const empty: PullResponse = {
   cursor: 1,
   hasMore: false,
   purgedBefore: null,
-  upserts: { tasks: [], placements: [], logEntries: [] },
+  timerStart: null,
+  upserts: { tasks: [], placements: [], logEntries: [], priorityHistory: [] },
   deletes: { tasks: [], placements: [], logEntries: [] },
 };
 
@@ -52,8 +53,8 @@ describe("SyncEngine retries by itself", () => {
     sync.start();
     await new TaskActions({ store, sync }).create({ title: "made during a blip" });
 
-    await waitFor(() => received.length === 1);
-    expect(received[0]).toMatchObject({ op: "createTask" });
+    await waitFor(() => received.length > 0);
+    expect(received.map((c) => c.op)).toEqual(["createTask", "recordPriority"]); // + its history snapshot
     await waitFor(() => sync.getStatus().state === "idle");
     expect(sync.getStatus().pending).toBe(0);
     sync.stop();

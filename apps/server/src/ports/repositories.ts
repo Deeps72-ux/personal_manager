@@ -6,13 +6,15 @@
  * ISOLATION RULE: every method that reads or writes user data takes `userId`
  * as its first argument. There is no way to call a repository "for all users".
  */
-import type { Day, LogEntry, Placement, Task, TaskPatch } from "@pm/shared";
+import type { Day, LogEntry, Placement, PrioritySnapshot, Task, TaskPatch } from "@pm/shared";
 
 export interface UserRecord {
   id: string;
   username: string;
   passwordHash: string;
   purgedBefore: Day | null;
+  /** Start of the one shared TIMER (epoch ms), null until a device sets it. */
+  timerStart?: number | null;
 }
 
 export interface UserRepository {
@@ -21,6 +23,8 @@ export interface UserRepository {
   /** Throws UsernameTakenError if the username exists. */
   insert(user: UserRecord): Promise<void>;
   setPurgedBefore(userId: string, day: Day): Promise<void>;
+  /** timer_start = max(timer_start, startMs): the latest restart wins, in any arrival order. */
+  raiseTimerStart(userId: string, startMs: number): Promise<void>;
 }
 
 export interface SessionRecord {
@@ -53,6 +57,7 @@ export interface PlacementRepository {
   listAll(userId: string): Promise<Placement[]>;
   insert(userId: string, placement: Placement): Promise<void>;
   setRank(userId: string, taskId: string, rank: string): Promise<void>;
+  setQueuedAt(userId: string, taskId: string, queuedAt: number): Promise<void>;
   delete(userId: string, taskId: string): Promise<void>;
 }
 
@@ -62,11 +67,21 @@ export interface LogRepository {
   listAll(userId: string): Promise<LogEntry[]>;
   insert(userId: string, entry: LogEntry): Promise<void>;
   delete(userId: string, id: string): Promise<void>;
+  /** Logs of `day` that have a start time (placed on the clock). */
+  listTimedForDay(userId: string, day: Day): Promise<LogEntry[]>;
   /** Hard-deletes logs with day < `before` and returns their ids. */
   deleteBefore(userId: string, before: Day): Promise<string[]>;
 }
 
-export type SyncedTable = "tasks" | "placements" | "log_entries";
+export interface PriorityHistoryRepository {
+  get(userId: string, id: string): Promise<PrioritySnapshot | null>;
+  getMany(userId: string, ids: readonly string[]): Promise<PrioritySnapshot[]>;
+  listAll(userId: string): Promise<PrioritySnapshot[]>;
+  insert(userId: string, snapshot: PrioritySnapshot): Promise<void>;
+}
+
+/** "timer" rows only bump the cursor (row id = user id); the value travels in every pull. */
+export type SyncedTable = "tasks" | "placements" | "log_entries" | "priority_history" | "timer";
 export type ChangeOpKind = "upsert" | "delete";
 
 export interface ChangeLogEntry {
@@ -97,5 +112,6 @@ export interface Repositories {
   tasks: TaskRepository;
   placements: PlacementRepository;
   logs: LogRepository;
+  priorityHistory: PriorityHistoryRepository;
   changeLog: ChangeLogRepository;
 }

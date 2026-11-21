@@ -54,6 +54,85 @@ export function deviationPercent(activities: readonly string[], priorityTitles: 
   return (100 * (m - 1 + phi)) / (n + 1);
 }
 
+// ───────────── one activity per log ─────────────
+
+export type ActivityResult = { ok: true; activity: string } | { ok: false; error: string };
+
+export const ONE_ACTIVITY_ERROR = "One activity per log: nothing can come after ';'";
+
+/** True if `text` has something other than spaces after a ";" (a second activity). */
+export function hasTextAfterSeparator(text: string): boolean {
+  const at = text.indexOf(";");
+  return at !== -1 && text.slice(at + 1).trim() !== "";
+}
+
+/**
+ * A log holds exactly ONE activity, written `Activity;`. The closing ";" is
+ * added if missing; anything after it is refused. A task title that itself
+ * contains ";" (made before this rule) is accepted when typed exactly.
+ */
+export function parseActivity(text: string, knownTitles: readonly string[] = []): ActivityResult {
+  let a = text.trim();
+  if (a.endsWith(";")) a = a.slice(0, -1).trim();
+  if (!a) return { ok: false, error: "Type what you did" };
+  if (a.includes(";") && !knownTitles.some((t) => t.trim() === a)) return { ok: false, error: ONE_ACTIVITY_ERROR };
+  return { ok: true, activity: a };
+}
+
+/** How a title is matched against the priority list. */
+export const activityKey = (title: string): string => {
+  let t = title.trim();
+  if (t.endsWith(";")) t = t.slice(0, -1).trim();
+  return t.toLocaleLowerCase();
+};
+
+// ───────────── deviation from the priority history ─────────────
+
+export interface PriorityAt {
+  at: number;
+  titles: readonly string[];
+}
+
+/** D of one activity against one list: 100·(m − 1)/(n + 1); not listed → m = n + 1. Null if the list is empty. */
+export function rankDeviation(activity: string, titles: readonly string[]): number | null {
+  const n = titles.length;
+  if (n === 0) return null;
+  const key = activityKey(activity);
+  const i = titles.findIndex((t) => activityKey(t) === key);
+  const m = i === -1 ? n + 1 : i + 1;
+  return (100 * (m - 1)) / (n + 1);
+}
+
+/**
+ * D of one activity done during [startMs, endMs), when the priority order may
+ * have changed while it ran: each piece is scored against the order in force
+ * then, and the pieces are averaged by time. `history` must be sorted by `at`.
+ * Time before the first snapshot (or under an empty list) has no reference
+ * and is left out. Null if no part of the span has a reference.
+ */
+export function deviationOverTime(
+  activity: string,
+  startMs: number,
+  endMs: number,
+  history: readonly PriorityAt[],
+): number | null {
+  let sum = 0;
+  let weight = 0;
+  for (let k = 0; k < history.length; k++) {
+    const from = Math.max(startMs, history[k]!.at);
+    const to = Math.min(endMs, history[k + 1]?.at ?? Infinity);
+    if (to <= from) continue;
+    const d = rankDeviation(activity, history[k]!.titles);
+    if (d === null) continue;
+    sum += d * (to - from);
+    weight += to - from;
+  }
+  return weight === 0 ? null : sum / weight;
+}
+
+/** FOCUS of one clock hour: 100 / (1 + switches). */
+export const hourFocus = (switches: number): number => 100 / (1 + switches);
+
 /** "33.3%" — one decimal, trailing ".0" dropped. */
 export function formatPercent(value: number): string {
   const s = (Math.round(value * 10) / 10).toFixed(1);

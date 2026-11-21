@@ -9,7 +9,17 @@
  * and writes a change_log line for each row it touches, so other devices
  * learn about it on their next pull.
  */
-import type { Change, ChangeOp, IgnoredReason } from "@pm/shared";
+import {
+  logSpan,
+  overlaps,
+  subtractIntervals,
+  uuidv7,
+  type Change,
+  type ChangeOp,
+  type IgnoredReason,
+  type Interval,
+  type LogEntry,
+} from "@pm/shared";
 import type { Repositories } from "../../ports/repositories.ts";
 
 export type ApplyResult = { status: "applied" } | { status: "ignored"; reason: IgnoredReason };
@@ -29,6 +39,26 @@ const ignored = (reason: IgnoredReason): ApplyResult => ({ status: "ignored", re
 /** Why an existing-row operation found nothing: deleted elsewhere, or never existed. */
 async function missingTask(repos: Repositories, userId: string, taskId: string): Promise<ApplyResult> {
   return ignored((await repos.changeLog.wasDeleted(userId, "tasks", taskId)) ? "deleted" : "notFound");
+}
+
+/** `entry` cut down to what is left of it outside `cut`: one piece per remaining span (under 1 s dropped). */
+function pieces(entry: LogEntry, cut: readonly Interval[], nowMs: number): LogEntry[] {
+  const left = subtractIntervals(logSpan(entry.startMs!, entry.seconds), cut);
+  return left
+    .map((i) => ({ start: i.start, seconds: Math.floor((i.end - i.start) / 1000) }))
+    .filter((p) => p.seconds >= 1)
+    .map((p, k) => ({ ...entry, id: k === 0 ? entry.id : uuidv7(nowMs), startMs: p.start, seconds: p.seconds }));
+}
+
+/** Insert what is left of `entry` outside `cut`. The first piece keeps the id, so a resend stays a no-op. */
+async function insertTrimmed(repos: Repositories, userId: string, nowMs: number, entry: LogEntry, cut: readonly Interval[]) {
+  const rest = pieces(entry, cut, nowMs);
+  for (const p of rest) {
+    await repos.logs.insert(userId, p);
+    await repos.changeLog.append(userId, "log_entries", p.id, "upsert", nowMs);
+  }
+  // Fully covered: tell the device that made it to drop its copy.
+  if (rest.length === 0) await repos.changeLog.append(userId, "log_entries", entry.id, "delete", nowMs);
 }
 
 export const changeHandlers: ChangeHandlers = {
@@ -72,8 +102,31 @@ export const changeHandlers: ChangeHandlers = {
     if (await repos.logs.get(userId, entry.id)) return applied; // resend
     if (await repos.changeLog.wasDeleted(userId, "log_entries", entry.id)) return ignored("deleted");
     // No 24h check here on purpose: that rule lives in the UI only.
+    if (entry.startMs === null || entry.startMs === undefined || !entry.source) {
+      await repos.logs.insert(userId, entry); // older device: not on the clock
+      await repos.changeLog.append(userId, "log_entries", entry.id, "upsert", nowMs);
+      return applied;
+    }
+
+    // Two devices may have logged the same time while apart. THE TIMER WINS
+    // over a manual log: the manual one is trimmed to the time left outside
+    // the timer log. Timer vs timer and manual vs manual are kept; the device
+    // asks the user which one to keep.
+    const span = logSpan(entry.startMs, entry.seconds);
+    const clashing = (await repos.logs.listTimedForDay(userId, entry.day)).filter((o) =>
+      overlaps(span, logSpan(o.startMs!, o.seconds)),
+    );
+    if (entry.source === "manual") {
+      const timers = clashing.filter((o) => o.source === "timer").map((o) => logSpan(o.startMs!, o.seconds));
+      await insertTrimmed(repos, userId, nowMs, entry, timers);
+      return applied;
+    }
     await repos.logs.insert(userId, entry);
     await repos.changeLog.append(userId, "log_entries", entry.id, "upsert", nowMs);
+    for (const manual of clashing.filter((o) => o.source === "manual")) {
+      await repos.logs.delete(userId, manual.id);
+      await insertTrimmed(repos, userId, nowMs, manual, [span]);
+    }
     return applied;
   },
 
@@ -81,6 +134,29 @@ export const changeHandlers: ChangeHandlers = {
     if (!(await repos.logs.get(userId, logId))) return ignored("notFound");
     await repos.logs.delete(userId, logId);
     await repos.changeLog.append(userId, "log_entries", logId, "delete", nowMs);
+    return applied;
+  },
+
+  async queueTask(repos, { userId, nowMs }, { taskId, queuedAt }) {
+    const p = await repos.placements.get(userId, taskId);
+    if (!p) return missingTask(repos, userId, taskId);
+    if (p.queuedAt !== null && p.queuedAt !== undefined) return applied; // already waiting: keep the first time
+    await repos.placements.setQueuedAt(userId, taskId, queuedAt);
+    await repos.changeLog.append(userId, "placements", taskId, "upsert", nowMs);
+    return applied;
+  },
+
+  async recordPriority(repos, { userId, nowMs }, { snapshot }) {
+    if (await repos.priorityHistory.get(userId, snapshot.id)) return applied; // resend
+    await repos.priorityHistory.insert(userId, snapshot);
+    await repos.changeLog.append(userId, "priority_history", snapshot.id, "upsert", nowMs);
+    return applied;
+  },
+
+  async setTimerStart(repos, { userId, nowMs }, { startMs }) {
+    await repos.users.raiseTimerStart(userId, startMs);
+    // Only bumps the cursor so other devices pull; the value rides on every pull.
+    await repos.changeLog.append(userId, "timer", userId, "upsert", nowMs);
     return applied;
   },
 

@@ -12,10 +12,10 @@
  *
  * Single-flight: overlapping requests collapse into "run once more after".
  */
-import { SYNC_LIMITS, type Change, type PullResponse } from "@pm/shared";
+import { SYNC_LIMITS, uuidv7, type Change, type PullResponse } from "@pm/shared";
 import { applyChangeLocally } from "./apply-change.ts";
 import { AuthExpiredError, NetworkError, RemoteError } from "./errors.ts";
-import type { LocalStore, RealtimeChannel, RealtimeStatus, RemoteApi, SyncTrigger } from "./ports.ts";
+import type { LocalStore, LocalTx, RealtimeChannel, RealtimeStatus, RemoteApi, SyncTrigger } from "./ports.ts";
 
 export type SyncState = "idle" | "syncing" | "offline" | "unauthorized" | "error";
 
@@ -230,7 +230,7 @@ export class SyncEngine implements SyncTrigger {
   }
 
   private async apply(p: PullResponse) {
-    await this.deps.store.write(async (tx) => {
+    const pushLater = await this.deps.store.write(async (tx) => {
       if (p.mode === "snapshot") await tx.clearSynced();
       for (const id of p.deletes.placements) await tx.deletePlacement(id);
       for (const id of p.deletes.tasks) await tx.deleteTask(id);
@@ -238,11 +238,37 @@ export class SyncEngine implements SyncTrigger {
       for (const t of p.upserts.tasks) await tx.putTask(t);
       for (const pl of p.upserts.placements) await tx.putPlacement(pl);
       for (const l of p.upserts.logEntries) await tx.putLog(l);
+      for (const s of p.upserts.priorityHistory) await tx.putSnapshot(s);
       await tx.setPurgedBefore(p.purgedBefore);
       await tx.setCursor(p.cursor);
+      const timerPush = await this.syncTimer(tx, p.timerStart);
       // Rebase: changes made while this sync was running stay visible.
       for (const c of await tx.listOutbox()) await applyChangeLocally(tx, c);
+      return timerPush;
     });
+    if (pushLater) this.again = true;
+  }
+
+  /**
+   * One TIMER for all devices. The server's start is the truth, except when
+   * this device holds a real start the server has not heard of yet (first
+   * sync after the update, or a later restart from before it): then the
+   * latest start wins and is pushed. A start this device only made up
+   * (provisional) never overrides the server's. Returns true if it queued a push.
+   */
+  private async syncTimer(tx: LocalTx, server: number | null): Promise<boolean> {
+    const local = await tx.getTimerStart();
+    const provisional = await tx.isTimerProvisional();
+    const pending = (await tx.listOutbox()).some((c) => c.op === "setTimerStart");
+    if (server !== null && (local === null || provisional || local <= server || pending)) {
+      await tx.setTimerStart(server); // a pending restart is re-applied by the rebase
+      return false;
+    }
+    if (local === null || pending) return false;
+    const change: Change = { changeId: uuidv7(), op: "setTimerStart", startMs: local };
+    await tx.enqueue(change);
+    await tx.setTimerStart(local);
+    return true;
   }
 
   private async refreshPending() {

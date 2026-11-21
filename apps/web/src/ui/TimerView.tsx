@@ -7,8 +7,8 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { LIMITS } from "@pm/shared";
-import { insertTitle, priorityOrder } from "../core/views.ts";
+import { LIMITS, ONE_ACTIVITY_ERROR, hasTextAfterSeparator } from "@pm/shared";
+import { chipText, scoringOrder } from "../core/views.ts";
 import { CheckIcon, XIcon } from "./icons.tsx";
 import { useLive, useServices } from "./services.tsx";
 import { cardLook } from "./TaskCard.tsx";
@@ -20,19 +20,23 @@ const GHOST_TAP_MS = 300;
 /**
  * TIMER: one round button in the middle of an empty screen.
  *
+ * ONE TIMER for all devices: its start is synced, so it can be started on
+ * the phone and ✓-ed on the laptop.
+ *
  * Hover (mouse), touch (finger) or Space/Enter replaces the button with:
  *   - ONE fixed time above (how long since the count last restarted),
  *   - a text bar exactly where the button was (screen centre),
- *   - ✓ / ✕ under it, and every task title (priority order) under those.
- * Tapping a title types `title;` at the cursor (once; remove it by hand).
- * ✓ logs the time from the last restart until NOW under the typed text,
+ *   - ✓ / ✕ under it, and every task title (scoring order) under those.
+ * A log holds ONE activity: `Activity;`. Tapping a title makes the bar exactly
+ * `title;`; the ";" is added on ✓ if left out; typing after a ";" is blocked.
+ * ✓ logs the time from the last restart until NOW under that activity,
  *   split across days at each local midnight, and restarts the count, in
- *   ONE local transaction (start time lives in the local DB, not localStorage).
+ *   ONE local transaction.
  * ✕ logs nothing; the button comes back and the count restarts from now.
  */
 export function TimerView() {
   const { timer } = useServices();
-  const tasks = useLive(async (s) => priorityOrder(await s.store.listTasks(), await s.store.listPlacements()), []);
+  const tasks = useLive(async (s) => scoringOrder(await s.store.listTasks(), await s.store.listPlacements()), []);
   const start = useLive((s) => s.store.timerStart(), []); // null until ensured
   const [openAt, setOpenAt] = useState<number | null>(null);
   const [text, setText] = useState("");
@@ -103,14 +107,19 @@ export function TimerView() {
 
   const pick = (title: string) => {
     if (ghostTap()) return;
-    const cursor = input.current?.selectionStart ?? text.length;
-    const r = insertTitle(text, cursor, title, LIMITS.titleMax);
-    if (!r.ok) {
-      if (r.reason === "too-long") setError(`Too long: the bar holds at most ${LIMITS.titleMax} characters`);
-      return; // "present": already typed, nothing to do
+    const next = chipText(title);
+    pendingCursor.current = next.length;
+    setText(next);
+    setError(null);
+  };
+
+  const type = (value: string) => {
+    // One activity per log: a second one (anything after ";") is not accepted.
+    if (hasTextAfterSeparator(value) && !(tasks ?? []).some((t) => chipText(t.title) === value.trim())) {
+      setError(ONE_ACTIVITY_ERROR);
+      return;
     }
-    pendingCursor.current = r.cursor;
-    setText(r.text);
+    setText(value);
     setError(null);
   };
 
@@ -142,13 +151,10 @@ export function TimerView() {
             ref={input}
             className="timer-input"
             aria-label="What did you do?"
-            placeholder="What did you do?"
-            maxLength={LIMITS.titleMax}
+            placeholder="One activity, e.g. Reading;"
+            maxLength={LIMITS.titleMax + 1}
             value={text}
-            onChange={(e) => {
-              setText(e.target.value);
-              setError(null);
-            }}
+            onChange={(e) => type(e.target.value)}
             onKeyDown={onInputKey}
           />
           <div className="timer-bottom">

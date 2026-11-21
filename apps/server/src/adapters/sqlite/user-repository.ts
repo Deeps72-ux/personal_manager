@@ -8,6 +8,7 @@ const toUser = (r: Row): UserRecord => ({
   username: r.username as string,
   passwordHash: r.password_hash as string,
   purgedBefore: (r.purged_before as string | null) ?? null,
+  timerStart: r.timer_start === null || r.timer_start === undefined ? null : Number(r.timer_start),
 });
 
 export class SqliteUserRepository implements UserRepository {
@@ -36,6 +37,12 @@ export class SqliteUserRepository implements UserRepository {
       if (isUniqueViolation(err)) throw new UsernameTakenError();
       throw err;
     }
+  }
+
+  async raiseTimerStart(userId: string, startMs: number) {
+    this.db
+      .prepare("UPDATE users SET timer_start = MAX(COALESCE(timer_start, 0), ?) WHERE id = ?")
+      .run(startMs, userId);
   }
 
   async setPurgedBefore(userId: string, day: string) {

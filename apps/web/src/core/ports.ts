@@ -9,6 +9,7 @@ import type {
   Day,
   LogEntry,
   Placement,
+  PrioritySnapshot,
   PullResponse,
   PushResponse,
   Task,
@@ -34,6 +35,10 @@ export interface LocalTx {
   deleteLogsBefore(day: Day): Promise<void>;
   listLogsForDay(day: Day): Promise<LogEntry[]>;
 
+  putSnapshot(s: PrioritySnapshot): Promise<void>;
+  /** PRIORITY HISTORY, oldest first. */
+  listHistory(): Promise<PrioritySnapshot[]>;
+
   /** Append to the outbox (changes not yet accepted by the server). */
   enqueue(change: Change): Promise<void>;
   listOutbox(): Promise<Change[]>;
@@ -41,12 +46,17 @@ export interface LocalTx {
   setCursor(cursor: number): Promise<void>;
   getPurgedBefore(): Promise<Day | null>;
   setPurgedBefore(day: Day | null): Promise<void>;
-  /** Remove all synced rows (tasks, placements, logs). Outbox is kept. */
+  /** Remove all synced rows (tasks, placements, logs, history). Outbox is kept. */
   clearSynced(): Promise<void>;
 
-  /** TIMER start (epoch ms), per device, never synced. Kept by clearSynced. */
+  /**
+   * Start of the one shared TIMER (epoch ms), this device's copy. Kept by
+   * clearSynced. `provisional`: made up on this device before it ever heard
+   * from the server, so the server's value replaces it.
+   */
   getTimerStart(): Promise<number | null>;
-  setTimerStart(ms: number): Promise<void>;
+  setTimerStart(ms: number, provisional?: boolean): Promise<void>;
+  isTimerProvisional(): Promise<boolean>;
 }
 
 export interface LocalStore {
@@ -58,6 +68,8 @@ export interface LocalStore {
   listLogsForDay(day: Day): Promise<LogEntry[]>;
   /** Inclusive range, sorted by day. */
   listLogsBetween(from: Day, to: Day): Promise<LogEntry[]>;
+  /** PRIORITY HISTORY, oldest first. */
+  listHistory(): Promise<PrioritySnapshot[]>;
 
   listOutbox(): Promise<Change[]>;
   removeFromOutbox(changeIds: readonly string[]): Promise<void>;
@@ -114,7 +126,8 @@ export interface SyncTrigger {
 }
 
 export interface SpreadsheetWriter {
-  writeLog(entries: readonly LogEntry[]): Promise<Blob>;
+  /** `deviation(e)`: the log's DEVIATION in percent, null when not scored. */
+  writeLog(entries: readonly LogEntry[], deviation: (e: LogEntry) => number | null): Promise<Blob>;
 }
 
 export interface FileSaver {
