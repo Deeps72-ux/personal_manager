@@ -114,9 +114,37 @@ describe("PriorityActions", () => {
     ]);
     expect((await app.store.listHistory()).at(-1)!.titles).toEqual(["A", "C", "D", "B"]);
 
-    // Popping = deleting the task everywhere.
+    // Deleting a queued task (TASKS tab) also takes it out of the queue.
     await app.tasks.remove(await id("C"), t0 + 3000);
     expect((await app.store.listHistory()).at(-1)!.titles).toEqual(["A", "D", "B"]);
+  });
+
+  it("pulling a task out of the queue puts it back SECOND in the list, kept, and it waits from zero if re-queued", async () => {
+    const app = setup();
+    for (const t of ["D", "C", "B", "A"]) await app.tasks.create({ title: t }); // A, B, C, D
+    const id = async (title: string) => (await app.store.listTasks()).find((t) => t.title === title)!.id;
+    const t0 = Date.now() + 1000;
+    await app.priority.enqueue(await id("D"), t0);
+    await app.priority.dequeue(await id("D"), t0 + 1000);
+    const now = async () => splitPriority(await app.store.listTasks(), await app.store.listPlacements());
+    expect((await now()).list.map((t) => t.title)).toEqual(["A", "D", "B", "C"]);
+    expect((await now()).queue).toEqual([]);
+    expect((await app.store.listTasks()).map((t) => t.title).sort()).toEqual(["A", "B", "C", "D"]); // not deleted
+    expect((await app.store.listOutbox()).map((c) => c.op)).toContain("dequeueTask");
+    expect((await app.store.listHistory()).at(-1)!.titles).toEqual(["A", "D", "B", "C"]);
+
+    await app.priority.enqueue(await id("D"), t0 + 5000);
+    expect((await now()).queue.map((q) => q.queuedAt)).toEqual([t0 + 5000]);
+    await app.priority.dequeue(await id("A"), t0 + 6000); // not queued: nothing happens
+    expect((await now()).list.map((t) => t.title)).toEqual(["A", "B", "C"]);
+  });
+
+  it("pulled out with the list empty, it becomes the top task", async () => {
+    const app = setup();
+    const a = await app.tasks.create({ title: "Only" });
+    await app.priority.enqueue(a.id);
+    await app.priority.dequeue(a.id);
+    expect(splitPriority(await app.store.listTasks(), await app.store.listPlacements()).list.map((t) => t.title)).toEqual(["Only"]);
   });
 
   it("moving counts positions in the VISIBLE list, skipping queued cards", async () => {

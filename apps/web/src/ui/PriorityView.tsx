@@ -193,10 +193,10 @@ function QueueButton({
 /**
  * The WAITING QUEUE as a downward pipeline: newest on top, the first one in
  * at the bottom. Only the bottom task can be pulled out (dragged down into
- * the outlet), which deletes it.
+ * the outlet): it goes back to the priority list, second from the top.
  */
 function QueueModal({ queue, now, onClose }: { queue: readonly QueuedTask[]; now: number; onClose: () => void }) {
-  const { tasks } = useServices();
+  const { priority } = useServices();
   const [leaving, setLeaving] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const sensors = useSensors(
@@ -220,7 +220,7 @@ function QueueModal({ queue, now, onClose }: { queue: readonly QueuedTask[]; now
     if (e.over?.id !== EXIT_ID || !bottom) return;
     const id = bottom.task.id;
     setLeaving(id);
-    void tasks.remove(id).finally(() => setLeaving(null));
+    void priority.dequeue(id).finally(() => setLeaving(null));
   };
 
   return (
@@ -247,7 +247,10 @@ function QueueModal({ queue, now, onClose }: { queue: readonly QueuedTask[]; now
             onDragEnd={onDragEnd}
             onDragCancel={() => setDragging(false)}
           >
-            <p className="hint">In at the top, out at the bottom. Pull the bottom task down and out to finish it: it is deleted.</p>
+            <p className="hint">
+              In at the top, out at the bottom. Pull the bottom task down and out: it goes back to your priority list
+              as #2, under your top task.
+            </p>
             <ol className="pipeline">
               {pipeline.map((q) =>
                 q === bottom ? (
@@ -284,7 +287,7 @@ function BottomCard({ item, now }: { item: QueuedTask; now: number }) {
       ref={setNodeRef}
       className={`pipe-item bottom ${isDragging ? "lifting" : ""}`}
       style={{ ...heatStyle(heat(now - item.queuedAt)), transform: CSS.Translate.toString(transform) }}
-      aria-label={`${item.task.title}, first in line. Drag down and out to finish it.`}
+      aria-label={`${item.task.title}, first in line. Drag down and out to put it back in the priority list as #2.`}
       {...attributes}
       {...listeners}
     >
@@ -297,7 +300,7 @@ function Outlet({ armed }: { armed: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: EXIT_ID });
   return (
     <div ref={setNodeRef} className={`queue-outlet ${armed ? "armed" : ""} ${isOver ? "over" : ""}`}>
-      {isOver ? "Release to finish and delete" : "↓ Pull out here"}
+      {isOver ? "Release: back to the list as #2" : "↓ Pull out here (back to the list as #2)"}
     </div>
   );
 }

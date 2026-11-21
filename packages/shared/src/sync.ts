@@ -48,6 +48,8 @@ export const ChangeSchema = z.discriminatedUnion("op", [
   z.strictObject({ ...base, op: z.literal("purgeLogsBefore"), before: DaySchema }),
   /** Drop a task into the WAITING QUEUE (it leaves the visible priority list). */
   z.strictObject({ ...base, op: z.literal("queueTask"), taskId: IdSchema, queuedAt: z.int().min(0) }),
+  /** Pull a task out of the WAITING QUEUE: back into the visible list at `rank`. */
+  z.strictObject({ ...base, op: z.literal("dequeueTask"), taskId: IdSchema, rank: RankSchema }),
   /** Append one PRIORITY HISTORY snapshot. */
   z.strictObject({ ...base, op: z.literal("recordPriority"), snapshot: PrioritySnapshotSchema }),
   /** The one shared TIMER restarted at `startMs`. The latest start wins. */

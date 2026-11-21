@@ -65,6 +65,20 @@ describe("waiting QUEUE and PRIORITY HISTORY", () => {
     expect((await c.useCases.pull.execute(userId, 0)).upserts.placements).toEqual([{ taskId: t.id, rank: "a0", queuedAt: 100 }]);
   });
 
+  it("dequeueTask clears the queue time and sets the new rank; queueing again starts a new wait", async () => {
+    const c = testContainer();
+    const { userId } = await newUser(c);
+    const t = task("Passport");
+    await c.useCases.push.execute(userId, [
+      ch({ op: "createTask", task: t, rank: "a0" }),
+      ch({ op: "queueTask", taskId: t.id, queuedAt: 100 }),
+      ch({ op: "dequeueTask", taskId: t.id, rank: "a5" }),
+    ]);
+    expect((await c.useCases.pull.execute(userId, 0)).upserts.placements).toEqual([{ taskId: t.id, rank: "a5", queuedAt: null }]);
+    await c.useCases.push.execute(userId, [ch({ op: "queueTask", taskId: t.id, queuedAt: 900 })]);
+    expect((await c.useCases.pull.execute(userId, 0)).upserts.placements[0]!.queuedAt).toBe(900);
+  });
+
   it("snapshots are stored once and come back in time order", async () => {
     const c = testContainer();
     const { userId } = await newUser(c);

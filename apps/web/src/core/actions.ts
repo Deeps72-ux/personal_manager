@@ -117,6 +117,26 @@ function taskError(title: string, description: string | null, dueDate: string | 
 
 // ───────────── PRIORITY ─────────────
 
+/**
+ * Rank that puts `taskId` at `toIndex` of the VISIBLE list (queued tasks are
+ * not in it; the task itself is left out first). Null if it has no placement.
+ */
+async function rankInVisible(tx: LocalTx, taskId: string, toIndex: number): Promise<string | null> {
+  const tasks = await tx.listTasks();
+  const all = await tx.listPlacements();
+  if (!all.some((p) => p.taskId === taskId)) return null;
+  const visible = priorityOrder(
+    tasks,
+    all.filter((p) => p.taskId !== taskId && (p.queuedAt === null || p.queuedAt === undefined)),
+  );
+  const rankOf = new Map(all.map((p) => [p.taskId, p.rank]));
+  const index = Math.max(0, Math.min(toIndex, visible.length));
+  const after = index < visible.length ? rankOf.get(visible[index]!.id)! : null;
+  // Right before the next visible card, in the full rank order (or at the end).
+  const ranks = sortedRanks(all.filter((p) => p.taskId !== taskId));
+  return rankAt(ranks, after === null ? ranks.length : ranks.indexOf(after));
+}
+
 export class PriorityActions {
   private readonly deps: Deps;
   constructor(deps: Deps) {
@@ -129,27 +149,31 @@ export class PriorityActions {
    */
   async move(taskId: string, toIndex: number, now = Date.now()): Promise<void> {
     const moved = await this.deps.store.write(async (tx) => {
-      // Positions count in the VISIBLE list (queued tasks are not in it).
-      const tasks = await tx.listTasks();
-      const all = await tx.listPlacements();
-      if (!all.some((p) => p.taskId === taskId)) return false;
-      const visible = priorityOrder(
-        tasks,
-        all.filter((p) => p.taskId !== taskId && (p.queuedAt === null || p.queuedAt === undefined)),
-      );
-      const rankOf = new Map(all.map((p) => [p.taskId, p.rank]));
-      const index = Math.max(0, Math.min(toIndex, visible.length));
-      const before = index > 0 ? rankOf.get(visible[index - 1]!.id)! : null;
-      const after = index < visible.length ? rankOf.get(visible[index]!.id)! : null;
-      // Between the two visible neighbours, in the full rank order.
-      const ranks = sortedRanks(all.filter((p) => p.taskId !== taskId));
-      const slot = after === null ? ranks.length : ranks.indexOf(after);
-      const rank = rankAt(ranks, before === null && after === null ? ranks.length : slot);
+      const rank = await rankInVisible(tx, taskId, toIndex);
+      if (rank === null) return false;
       await record(tx, { op: "moveTask", taskId, rank });
       await recordHistory(tx, now);
       return true;
     });
     if (moved) this.deps.sync.requestSync();
+  }
+
+  /**
+   * Pull a task out of the WAITING QUEUE (the bottom one, first in): it goes
+   * back into the visible list SECOND, right under the top task (or on top
+   * if the list is empty). Queued again later, it waits from zero.
+   */
+  async dequeue(taskId: string, now = Date.now()): Promise<void> {
+    const done = await this.deps.store.write(async (tx) => {
+      const p = await tx.getPlacement(taskId);
+      if (!p || p.queuedAt === null || p.queuedAt === undefined) return false;
+      const rank = await rankInVisible(tx, taskId, 1);
+      if (rank === null) return false;
+      await record(tx, { op: "dequeueTask", taskId, rank });
+      await recordHistory(tx, now);
+      return true;
+    });
+    if (done) this.deps.sync.requestSync();
   }
 
   /** Drop a task into the WAITING QUEUE: it leaves the visible list and starts waiting from `now`. */

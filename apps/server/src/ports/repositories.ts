@@ -57,7 +57,7 @@ export interface PlacementRepository {
   listAll(userId: string): Promise<Placement[]>;
   insert(userId: string, placement: Placement): Promise<void>;
   setRank(userId: string, taskId: string, rank: string): Promise<void>;
-  setQueuedAt(userId: string, taskId: string, queuedAt: number): Promise<void>;
+  setQueuedAt(userId: string, taskId: string, queuedAt: number | null): Promise<void>;
   delete(userId: string, taskId: string): Promise<void>;
 }
 

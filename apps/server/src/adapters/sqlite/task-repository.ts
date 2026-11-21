@@ -102,7 +102,7 @@ export class SqlitePlacementRepository implements PlacementRepository {
     this.db.prepare("UPDATE placements SET rank = ? WHERE user_id = ? AND task_id = ?").run(rank, userId, taskId);
   }
 
-  async setQueuedAt(userId: string, taskId: string, queuedAt: number) {
+  async setQueuedAt(userId: string, taskId: string, queuedAt: number | null) {
     this.db.prepare("UPDATE placements SET queued_at = ? WHERE user_id = ? AND task_id = ?").run(queuedAt, userId, taskId);
   }
 

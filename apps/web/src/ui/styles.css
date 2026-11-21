@@ -1273,11 +1273,11 @@ textarea {
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 .queue-outlet.armed {
-  border-color: var(--danger);
-  color: var(--danger);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 .queue-outlet.over {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
   border-style: solid;
 }
 

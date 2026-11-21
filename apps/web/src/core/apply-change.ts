@@ -41,6 +41,11 @@ export async function applyChangeLocally(tx: LocalTx, change: Change): Promise<v
       if (p && (p.queuedAt === null || p.queuedAt === undefined)) await tx.putPlacement({ ...p, queuedAt: change.queuedAt });
       return;
     }
+    case "dequeueTask": {
+      const p = await tx.getPlacement(change.taskId);
+      if (p) await tx.putPlacement({ ...p, rank: change.rank, queuedAt: null });
+      return;
+    }
     case "recordPriority":
       await tx.putSnapshot(change.snapshot);
       return;

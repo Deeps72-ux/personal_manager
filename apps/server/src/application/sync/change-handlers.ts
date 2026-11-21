@@ -146,6 +146,15 @@ export const changeHandlers: ChangeHandlers = {
     return applied;
   },
 
+  async dequeueTask(repos, { userId, nowMs }, { taskId, rank }) {
+    const p = await repos.placements.get(userId, taskId);
+    if (!p) return missingTask(repos, userId, taskId);
+    await repos.placements.setRank(userId, taskId, rank);
+    await repos.placements.setQueuedAt(userId, taskId, null);
+    await repos.changeLog.append(userId, "placements", taskId, "upsert", nowMs);
+    return applied;
+  },
+
   async recordPriority(repos, { userId, nowMs }, { snapshot }) {
     if (await repos.priorityHistory.get(userId, snapshot.id)) return applied; // resend
     await repos.priorityHistory.insert(userId, snapshot);
