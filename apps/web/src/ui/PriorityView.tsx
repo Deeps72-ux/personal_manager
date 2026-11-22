@@ -24,9 +24,9 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { Task } from "@pm/shared";
-import { splitPriority, type QueuedTask } from "../core/views.ts";
-import { GripIcon, QueueIcon, XIcon } from "./icons.tsx";
+import { latestConfirmed, type Task } from "@pm/shared";
+import { canConfirm, splitPriority, type QueuedTask } from "../core/views.ts";
+import { CheckIcon, GripIcon, QueueIcon, XIcon } from "./icons.tsx";
 import { formatWait, heat, useNow, type Heat } from "./queue-heat.ts";
 import { useLive, useServices } from "./services.tsx";
 import { TaskCard } from "./TaskCard.tsx";
@@ -52,10 +52,17 @@ const heatStyle = (h: Heat) =>
  * PRIORITY: every card in one stack; drag to reorder. New cards appear on top.
  * Top right: the WAITING QUEUE. Drag a card onto it to park it there; it
  * glows from blue to red as its oldest task keeps waiting.
+ *
+ * Next to it, the CONFIRM icon: reordering, adding, deleting, queuing and
+ * un-queuing only change what you see. Scores keep using the last confirmed
+ * order until you press it; then the visible list (never the queue) is
+ * snapshotted at that moment. It can only be pressed when the order differs.
  */
 export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
   const { priority } = useServices();
   const data = useLive(async (s) => splitPriority(await s.store.listTasks(), await s.store.listPlacements()), []);
+  const confirmed = useLive(async (s) => latestConfirmed(await s.store.listHistory()), []);
+  const [confirming, setConfirming] = useState(false);
   // Optimistic order while the drop is being written, so cards never jump back.
   const [optimistic, setOptimistic] = useState<string[] | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -74,6 +81,15 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const ids = (optimistic ?? tasks.map((t) => t.id)).filter((id) => byId.has(id));
   const active = activeId ? byId.get(activeId) : undefined;
+  const pending = confirmed !== undefined && canConfirm(tasks.map((t) => t.title), confirmed);
+  const confirm = () => {
+    if (!pending || confirming) return;
+    setConfirming(true);
+    void priority
+      .confirm()
+      .catch((err: unknown) => console.error(err))
+      .finally(() => setConfirming(false));
+  };
 
   const onDragStart = (e: DragStartEvent) => setActiveId(String(e.active.id));
   const onDragEnd = (e: DragEndEvent) => {
@@ -110,7 +126,24 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
                 Drag cards to reorder, or onto the queue to park them. On a phone, press and hold a card first.
               </p>
             )}
+            {pending && (
+              <p className="hint confirm-hint" role="status">
+                {confirmed
+                  ? "Order changed: scores still use the last confirmed order. Press ✓ when you're done."
+                  : "Nothing confirmed yet: logs are not scored until you press ✓."}
+              </p>
+            )}
           </div>
+          <button
+            type="button"
+            className={`confirm-btn ${pending ? "pending" : ""}`}
+            disabled={!pending || confirming}
+            onClick={confirm}
+            aria-label={pending ? "Confirm this priority order" : "Priority order confirmed"}
+            title={pending ? "Confirm this priority order" : "This order is confirmed"}
+          >
+            <CheckIcon />
+          </button>
           <QueueButton queue={queue} now={now} dragging={activeId !== null} onOpen={() => setQueueOpen(true)} />
         </div>
 
@@ -193,7 +226,7 @@ function QueueButton({
 /**
  * The WAITING QUEUE as a downward pipeline: newest on top, the first one in
  * at the bottom. Only the bottom task can be pulled out (dragged down into
- * the outlet): it goes back to the priority list, second from the top.
+ * the outlet): it goes back to the priority list at the top (#1).
  */
 function QueueModal({ queue, now, onClose }: { queue: readonly QueuedTask[]; now: number; onClose: () => void }) {
   const { priority } = useServices();
@@ -248,8 +281,8 @@ function QueueModal({ queue, now, onClose }: { queue: readonly QueuedTask[]; now
             onDragCancel={() => setDragging(false)}
           >
             <p className="hint">
-              In at the top, out at the bottom. Pull the bottom task down and out: it goes back to your priority list
-              as #2, under your top task.
+              In at the top, out at the bottom. Pull the bottom task down and out: it goes back to the top of your
+              priority list as #1. Confirm the order there to score it.
             </p>
             <ol className="pipeline">
               {pipeline.map((q) =>
@@ -287,7 +320,7 @@ function BottomCard({ item, now }: { item: QueuedTask; now: number }) {
       ref={setNodeRef}
       className={`pipe-item bottom ${isDragging ? "lifting" : ""}`}
       style={{ ...heatStyle(heat(now - item.queuedAt)), transform: CSS.Translate.toString(transform) }}
-      aria-label={`${item.task.title}, first in line. Drag down and out to put it back in the priority list as #2.`}
+      aria-label={`${item.task.title}, first in line. Drag down and out to put it back at the top of the priority list as #1.`}
       {...attributes}
       {...listeners}
     >
@@ -300,7 +333,7 @@ function Outlet({ armed }: { armed: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: EXIT_ID });
   return (
     <div ref={setNodeRef} className={`queue-outlet ${armed ? "armed" : ""} ${isOver ? "over" : ""}`}>
-      {isOver ? "Release: back to the list as #2" : "↓ Pull out here (back to the list as #2)"}
+      {isOver ? "Release: back to the list as #1" : "↓ Pull out here (back to the list as #1)"}
     </div>
   );
 }

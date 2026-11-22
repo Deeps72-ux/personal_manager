@@ -85,7 +85,7 @@ describe("SyncEngine against the real server", () => {
     const [phone, laptop] = await signedIn(uniq(), "phone", "laptop");
     await phone!.tasks.create({ title: "first" });
     await phone!.tasks.create({ title: "second", dueDate: "2026-11-10" });
-    await phone!.logs.add("2026-11-05", "8h", "Sleep");
+    await phone!.logs.add("2026-11-05", "8h", "Sleep", new Date(2026, 10, 5).getTime());
     await settle(phone!, laptop!);
     expect(await laptop!.order()).toEqual(["second", "first"]);
     expect(await laptop!.state()).toEqual(await phone!.state());
@@ -107,9 +107,9 @@ describe("SyncEngine against the real server", () => {
     offline.holder.set(tokenFromOnline);
     offline.sync.start();
     await offline.tasks.create({ title: "made offline" });
-    await offline.logs.add("2026-11-05", 60, "made offline");
+    await offline.logs.add("2026-11-05", 60, "made offline", new Date(2026, 10, 5, 9).getTime());
     await offline.sync.syncNow();
-    expect(offline.sync.getStatus()).toMatchObject({ state: "offline", pending: 3 }); // task + its history snapshot + log
+    expect(offline.sync.getStatus()).toMatchObject({ state: "offline", pending: 2 }); // task + log
     expect(await offline.order()).toEqual(["made offline"]); // UI still shows it
 
     // "Back online": same local data + outbox, real server address.
@@ -202,7 +202,7 @@ describe("SyncEngine against the real server", () => {
     await phone!.sync.syncNow();
     expect(phone!.sync.getStatus().state).toBe("unauthorized");
     expect(phone!.unauthorized()).toBe(1);
-    expect((await phone!.store.listOutbox()).map((c) => c.op)).toEqual(["createTask", "recordPriority"]);
+    expect((await phone!.store.listOutbox()).map((c) => c.op)).toEqual(["createTask"]);
 
     // Re-sign-in (same user) keeps data and the outbox flushes.
     await phone!.auth.signIn(username, "password123");
@@ -228,11 +228,11 @@ describe("SyncEngine against the real server", () => {
 
   it("purge on one device: offline log on another is refused and removed locally", async () => {
     const [mac, phone] = await signedIn(uniq(), "mac", "phone");
-    await mac!.logs.add("2026-01-05", 100, "kept");
+    await mac!.logs.add("2026-01-05", 100, "kept", new Date(2026, 0, 5, 9).getTime());
     await mac!.sync.syncNow();
     await phone!.sync.syncNow();
     phone!.sync.stop(); // phone goes offline
-    await phone!.logs.add("2025-12-20", 3600, "Reading");
+    await phone!.logs.add("2025-12-20", 3600, "Reading", new Date(2025, 11, 20, 9).getTime());
     await mac!.logs.purgeBefore("2026-01-01");
     await mac!.sync.syncNow();
     phone!.sync.start();
@@ -280,14 +280,15 @@ describe("SyncEngine against the real server", () => {
     for (const d of [phone!, mac!, tablet]) d.sync.stop();
   });
 
-  it("the priority history and the waiting queue reach every device", async () => {
+  it("the confirmed priority history (flag included) and the waiting queue reach every device", async () => {
     const [phone, mac] = await signedIn(uniq(), "phone", "mac");
     for (const t of ["C", "B", "A"]) await phone!.tasks.create({ title: t });
     const c = (await phone!.store.listTasks()).find((t) => t.title === "C")!;
     await phone!.priority.enqueue(c.id);
+    await phone!.priority.confirm();
     await settle(phone!, mac!);
     expect((await mac!.store.listPlacements()).find((p) => p.taskId === c.id)?.queuedAt).toBeTypeOf("number");
-    expect((await mac!.store.listHistory()).at(-1)!.titles).toEqual(["A", "C", "B"]);
+    expect((await mac!.store.listHistory()).map((h) => [h.titles, h.confirmed])).toEqual([[["A", "B"], true]]);
     expect(await mac!.store.listHistory()).toEqual(await phone!.store.listHistory());
     for (const d of [phone!, mac!]) d.sync.stop();
   });

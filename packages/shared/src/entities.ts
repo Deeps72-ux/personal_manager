@@ -37,8 +37,8 @@ const EpochMs = z.int().min(0).max(2 ** 48 - 1);
 /**
  * Where a task sits in the PRIORITY list (separate from Task: SRP).
  * `queuedAt`: when the task was dropped into the WAITING QUEUE (epoch ms).
- * A queued task leaves the visible priority list but keeps its rank; for
- * scoring it ranks right after the top task. Missing/null = not queued.
+ * A queued task leaves the visible priority list but keeps its rank. The
+ * queue is never part of the scoring order. Missing/null = not queued.
  */
 export const PlacementSchema = z.strictObject({
   taskId: IdSchema,
@@ -92,10 +92,16 @@ export type TaskPatch = z.infer<typeof TaskPatchSchema>;
  * PRIORITY HISTORY: the scoring order (titles, best first) from `at` until
  * the next snapshot. Append-only, synced, never edited: a log is scored
  * against the order(s) in force while it ran.
+ *
+ * `confirmed`: true when the user pressed the confirm icon (the visible list
+ * only, never the queue). Missing/null = a LEGACY snapshot that older
+ * versions took on every change; those only count before the first
+ * confirmed snapshot (see `scoringHistory`).
  */
 export const PrioritySnapshotSchema = z.strictObject({
   id: IdSchema,
   at: EpochMs,
   titles: z.array(Title).max(2000),
+  confirmed: z.boolean().nullish(),
 });
 export type PrioritySnapshot = z.infer<typeof PrioritySnapshotSchema>;

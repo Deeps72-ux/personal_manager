@@ -1,25 +1,13 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import {
-  DndContext,
-  DragOverlay,
-  MouseSensor,
-  TouchSensor,
-  pointerWithin,
-  useDraggable,
-  useDroppable,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import { formatSeconds, parseSecondsInput, sumSeconds, type Day, type Task } from "@pm/shared";
-import { dayLayout, knownSpan, longestGap } from "../core/timeline.ts";
-import { formatDayLong, pad2, scoringOrder } from "../core/views.ts";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { formatPercent, formatSeconds, hasTextAfterSeparator, LIMITS, ONE_ACTIVITY_ERROR, sumSeconds, type Day } from "@pm/shared";
+import { logSlices } from "../core/insights.ts";
+import { carveByClock, daySegments, openIndexAt, piecesToLog, splitMiddle, type Segment } from "../core/split.ts";
+import { dayLayout, knownSpan } from "../core/timeline.ts";
+import { chipText, formatDayLong, pad2, pickOrder } from "../core/views.ts";
 import { ChevronLeft, XIcon } from "./icons.tsx";
-import type { ProposeResult } from "../core/actions.ts";
 import { useLive, useServices } from "./services.tsx";
+import { PieceRange, SplitBar } from "./SplitBar.tsx";
 import { cardLook } from "./TaskCard.tsx";
-
-const DROP_ID = "log-drop-zone";
 
 const clock = (t: number) => {
   const d = new Date(t);
@@ -27,39 +15,83 @@ const clock = (t: number) => {
 };
 
 /**
- * One day of the LOG. Drag a task card onto the drop zone (or tap it), type
- * how long; the app places it at the earliest free gap that holds it whole
- * and asks you to accept. Time covered by another log or by the running
- * TIMER is never free.
+ * One day of the LOG.
+ *
+ * Its 24 hours are a SPLIT BAR: time already logged and the running TIMER
+ * are locked; free time is open. Pick a free piece, set its exact From / To
+ * (or cut it with ✂ and drag the dividers), type or tap its activity, and
+ * save: each labeled piece becomes a manual log exactly there.
+ *
+ * Under it, every log is shown slice by slice: a slice per confirmed
+ * priority order in force while it ran, with that order's #1 task and the
+ * slice's own deviation.
  */
 export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
   const { logs } = useServices();
   const entries = useLive((s) => s.store.listLogsForDay(day), [day]);
   const timerStart = useLive((s) => s.store.timerStart(), []);
-  const tasks = useLive(async (s) => scoringOrder(await s.store.listTasks(), await s.store.listPlacements()), []);
+  const history = useLive((s) => s.store.listHistory(), []);
+  const tasks = useLive(async (s) => pickOrder(await s.store.listTasks(), await s.store.listPlacements()), []);
   const purgedBefore = useLive((s) => s.store.purgedBefore(), []);
-  const [picked, setPicked] = useState<string | null>(null);
-  const [dragging, setDragging] = useState<Task | null>(null);
 
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
-  );
+  const layout = useMemo(() => dayLayout(day, entries ?? [], timerStart ?? null), [day, entries, timerStart]);
+  // The bar starts again whenever what is taken changes (a save, a sync).
+  const takenKey = JSON.stringify([...layout.busy.map((b) => [b.start, b.end])]);
+  const [bar, setBar] = useState<{ key: string; segs: Segment[]; sel: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (entries === undefined || timerStart === undefined) return;
+    if (bar?.key === takenKey) return;
+    const segs = daySegments(day, layout);
+    setBar({ key: takenKey, segs, sel: openIndexAt(segs, Date.now()) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [takenKey, entries, timerStart, day]);
 
   const total = sumSeconds(entries ?? []);
-  const layout = dayLayout(day, entries ?? [], timerStart ?? null);
   const daySeconds = Math.round((layout.bounds.end - layout.bounds.start) / 1000);
   const busy = layout.busy.reduce((a, i) => a + (i.end - i.start) / 1000, 0);
   const free = Math.max(0, daySeconds - Math.round(busy));
-  const longest = longestGap(layout.free);
   const locked = purgedBefore != null && day < purgedBefore;
   const sorted = [...(entries ?? [])]
     .map((e) => ({ e, span: knownSpan(e) }))
     .sort((a, b) => (a.span?.start ?? Infinity) - (b.span?.start ?? Infinity) || (a.e.id < b.e.id ? -1 : 1));
 
-  const onDragEnd = (e: DragEndEvent) => {
-    setDragging(null);
-    if (e.over?.id === DROP_ID) setPicked(String(e.active.data.current?.title ?? ""));
+  const segs = bar?.segs ?? [];
+  const sel = bar?.sel ?? -1;
+  const picked = segs[sel]?.locked === null ? segs[sel] : undefined;
+  const update = (next: Segment[], nextSel = sel) => bar && setBar({ ...bar, segs: next, sel: nextSel });
+  const labeled = segs.filter((p) => p.locked === null && p.text.trim()).length;
+
+  const setText = (v: string) => {
+    if (!picked) return;
+    if (hasTextAfterSeparator(v) && !(tasks ?? []).some((t) => chipText(t.title) === v.trim())) {
+      setError(ONE_ACTIVITY_ERROR);
+      return;
+    }
+    update(segs.map((p, i) => (i === sel ? { ...p, text: v } : p)));
+    setError(null);
+  };
+
+  const save = async () => {
+    if (!bar || saving) return;
+    const check = piecesToLog(segs, (tasks ?? []).map((t) => t.title));
+    if (!check.ok) {
+      update(segs, check.index);
+      setError(check.error);
+      return;
+    }
+    setSaving(true);
+    try {
+      const r = await logs.addPieces(day, segs);
+      if (r.ok) setError(null);
+      else setError(r.error);
+    } catch (err) {
+      console.error(err);
+      setError("Could not save, try again");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -72,15 +104,9 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
       </div>
 
       <div className="daymeter" aria-label={`${total} seconds logged, ${free} seconds free`}>
-        <div className="daymeter-bar">
-          <span style={{ width: `${Math.min(100, (busy / daySeconds) * 100)}%` }} />
-        </div>
         <div className="daymeter-text">
           <strong>{formatSeconds(total)}</strong> logged
-          <span className="muted">
-            {" "}
-            · {formatSeconds(free)} free{free > 0 && longest < free ? ` (longest slot ${formatSeconds(longest)})` : ""}
-          </span>
+          <span className="muted"> · {formatSeconds(free)} free</span>
         </div>
         {layout.timer && (
           <p className="hint daymeter-timer">
@@ -93,47 +119,67 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
       {locked ? (
         <p className="notice">Logs before {purgedBefore} were deleted; this day is closed.</p>
       ) : (
-        <DndContext
-          sensors={sensors}
-          // A drop counts when the pointer/finger is over the zone: precise and
-          // forgiving for small chips on a phone.
-          collisionDetection={pointerWithin}
-          onDragStart={(e) => setDragging((e.active.data.current?.task as Task) ?? null)}
-          onDragEnd={onDragEnd}
-          onDragCancel={() => setDragging(null)}
-        >
-          <div className="palette" aria-label="Your tasks">
-            {tasks?.length === 0 && <p className="muted">No task cards yet. Add some in TASKS.</p>}
-            {tasks?.map((t) => (
-              <Chip key={t.id} task={t} onPick={() => setPicked(t.title)} />
-            ))}
-          </div>
-
-          <DropZone active={dragging !== null}>
+        bar && (
+          <div className="day-split">
+            <SplitBar
+              label="This day's 24 hours"
+              segs={segs}
+              selected={sel}
+              onSelect={(i) => {
+                update(segs, i);
+                setError(null);
+              }}
+              onChange={(next, i) => update(next, i ?? Math.min(sel, next.length - 1))}
+            />
             {picked ? (
-              <SecondsForm
-                key={picked}
-                title={picked}
-                longest={longest}
-                onCancel={() => setPicked(null)}
-                onPropose={(secs) => logs.propose(day, secs, picked)}
-                onAccept={async (secs, startMs) => {
-                  const r = await logs.add(day, secs, picked, startMs);
-                  if (r.ok) setPicked(null);
-                  return r.ok ? null : r.error;
-                }}
-              />
+              <div className="piece-editor">
+                <PieceRange
+                  seg={picked}
+                  canSplit={splitMiddle(segs, sel) !== null}
+                  onSplit={() => {
+                    const next = splitMiddle(segs, sel);
+                    if (next) update(next, sel + 1);
+                  }}
+                  onRange={(from, to) => {
+                    const r = carveByClock(segs, sel, from, to);
+                    if (r) update(r.segs, r.index);
+                  }}
+                />
+                <input
+                  className="piece-input"
+                  aria-label={`Activity from ${clock(picked.start)} to ${clock(picked.end)}`}
+                  placeholder="One activity, or leave empty (unlogged)"
+                  maxLength={LIMITS.titleMax + 1}
+                  value={picked.text}
+                  onChange={(e) => setText(e.target.value)}
+                />
+                {tasks && tasks.length > 0 && (
+                  <div className="palette" aria-label="Your tasks">
+                    {tasks.map((t) => (
+                      <button key={t.id} type="button" className="chip-btn" onClick={() => setText(chipText(t.title))}>
+                        <span className="chip" style={{ "--hue": cardLook(t.id).hue } as CSSProperties}>
+                          {t.title}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             ) : (
-              <p className="dropzone-hint">
-                {longest > 0
-                  ? "Drag a task card here (or tap one) to log time"
-                  : "No free time on this day: remove a log to make room"}
+              <p className="dropzone-hint">No free time on this day: remove a log to make room</p>
+            )}
+            {error && (
+              <p className="error" role="alert">
+                {error}
               </p>
             )}
-          </DropZone>
-
-          <DragOverlay>{dragging ? <ChipFace task={dragging} lifted /> : null}</DragOverlay>
-        </DndContext>
+            <div className="row">
+              <button className="primary" disabled={labeled === 0 || saving} onClick={() => void save()}>
+                {labeled > 1 ? `Log ${labeled} pieces` : "Log it"}
+              </button>
+            </div>
+          </div>
+        )
       )}
 
       <h3 className="section-title">
@@ -141,160 +187,52 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
       </h3>
       {entries && entries.length === 0 && <p className="empty">Nothing logged for this day yet.</p>}
       <ul className="entries">
-        {sorted.map(({ e, span }) => (
-          <li key={e.id} className="entry">
-            <span className="entry-secs">{span ? `${clock(span.start)}–${clock(span.end)}` : "no time"}</span>
-            <span className="entry-title">
-              {e.taskTitle}
-              {e.source && <span className="entry-source muted"> · {e.source}</span>}
-            </span>
-            <span className="entry-fmt muted">{formatSeconds(e.seconds)}</span>
-            <button className="icon" aria-label={`Delete ${e.taskTitle} entry`} onClick={() => void logs.remove(e.id)}>
+        {sorted.flatMap(({ e, span }) => {
+          const slices = logSlices(e, history ?? []);
+          const del = (
+            <button
+              className="icon"
+              aria-label={`Delete ${e.taskTitle} entry${slices.length > 1 ? ` (all ${slices.length} slices)` : ""}`}
+              onClick={() => void logs.remove(e.id)}
+            >
               <XIcon />
             </button>
-          </li>
-        ))}
+          );
+          const source = e.source && <span className="entry-source muted"> · {e.source}</span>;
+          if (slices.length === 0) {
+            const stored = e.deviation ?? null;
+            return [
+              <li key={e.id} className="entry">
+                <span className="entry-secs">{span ? `${clock(span.start)}–${clock(span.end)}` : "no time"}</span>
+                <span className="entry-title">
+                  {e.taskTitle}
+                  {source}
+                  {stored !== null && <span className="entry-meta muted">deviation {formatPercent(stored)}</span>}
+                </span>
+                <span className="entry-fmt muted">{formatSeconds(e.seconds)}</span>
+                {del}
+              </li>,
+            ];
+          }
+          return slices.map((sl, k) => (
+            <li key={`${e.id}:${k}`} className="entry">
+              <span className="entry-secs">
+                {clock(sl.start)}–{clock(sl.end)}
+              </span>
+              <span className="entry-title">
+                {e.taskTitle}
+                {source}
+                <span className="entry-meta muted">
+                  priority: {sl.top ?? "none confirmed"}
+                  {sl.deviation !== null && <> · deviation {formatPercent(sl.deviation)}</>}
+                </span>
+              </span>
+              <span className="entry-fmt muted">{formatSeconds(Math.round((sl.end - sl.start) / 1000))}</span>
+              {del}
+            </li>
+          ));
+        })}
       </ul>
     </section>
-  );
-}
-
-function Chip({ task, onPick }: { task: Task; onPick: () => void }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `chip-${task.id}`,
-    data: { title: task.title, task },
-  });
-  return (
-    <button
-      ref={setNodeRef}
-      type="button"
-      className={`chip-btn ${isDragging ? "ghosted" : ""}`}
-      onClick={onPick}
-      {...attributes}
-      {...listeners}
-    >
-      <ChipFace task={task} />
-    </button>
-  );
-}
-
-function ChipFace({ task, lifted = false }: { task: Task; lifted?: boolean }) {
-  return (
-    <span className={`chip ${lifted ? "lifted" : ""}`} style={{ "--hue": cardLook(task.id).hue } as React.CSSProperties}>
-      {task.title}
-    </span>
-  );
-}
-
-function DropZone({ active, children }: { active: boolean; children: React.ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({ id: DROP_ID });
-  return (
-    <div ref={setNodeRef} className={`dropzone ${active ? "armed" : ""} ${isOver ? "over" : ""}`}>
-      {children}
-    </div>
-  );
-}
-
-function SecondsForm({
-  title,
-  longest,
-  onPropose,
-  onAccept,
-  onCancel,
-}: {
-  title: string;
-  longest: number;
-  onPropose: (secs: string) => Promise<ProposeResult>;
-  onAccept: (secs: number, startMs: number) => Promise<string | null>;
-  onCancel: () => void;
-}) {
-  const [value, setValue] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [proposal, setProposal] = useState<{ seconds: number; startMs: number; endMs: number } | null>(null);
-  const input = useRef<HTMLInputElement>(null);
-  useEffect(() => input.current?.focus(), []);
-
-  const preview = value.trim() ? parseSecondsInput(value) : null;
-  const over = preview?.ok && preview.seconds > longest;
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    const r = await onPropose(value);
-    if (r.ok) setProposal(r);
-    else setError(r.error);
-  };
-
-  if (proposal) {
-    return (
-      <div className="secondsform proposal" role="group" aria-label="Confirm the time">
-        <div className="secondsform-title">
-          Place <strong>{title}</strong> at{" "}
-          <strong>
-            {clock(proposal.startMs)} – {clock(proposal.endMs)}
-          </strong>
-          ? <span className="muted">({formatSeconds(proposal.seconds)}, the earliest free slot)</span>
-        </div>
-        <div className="row">
-          <button
-            className="primary"
-            autoFocus
-            onClick={async () => {
-              const err = await onAccept(proposal.seconds, proposal.startMs);
-              if (err) {
-                setProposal(null);
-                setError(err);
-              }
-            }}
-          >
-            Accept
-          </button>
-          <button type="button" className="ghost" onClick={() => setProposal(null)}>
-            Cancel
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <form className="secondsform" onSubmit={submit}>
-      <div className="secondsform-title">
-        How long on <strong>{title}</strong>?
-      </div>
-      <div className="row">
-        <input
-          ref={input}
-          className="grow"
-          inputMode="text"
-          placeholder="e.g. 27, 8*60*60 or 1h30m"
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            setError(null);
-          }}
-          aria-label={`Seconds for ${title}`}
-        />
-        <button className="primary" disabled={!preview?.ok || over}>
-          Find a slot
-        </button>
-        <button type="button" className="ghost" onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-      <div className={`preview ${over || (preview && !preview.ok) ? "bad" : ""}`} aria-live="polite">
-        {preview?.ok &&
-          (over
-            ? longest === 0
-              ? "No free time on this day: remove a log first"
-              : `No free slot that long: the longest is ${formatSeconds(longest)}`
-            : `= ${preview.seconds.toLocaleString()} s (${formatSeconds(preview.seconds)})`)}
-        {preview && !preview.ok && preview.error}
-      </div>
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-    </form>
   );
 }

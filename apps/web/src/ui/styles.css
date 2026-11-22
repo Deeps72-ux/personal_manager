@@ -1318,3 +1318,185 @@ textarea {
     animation: none;
   }
 }
+
+/* ───────────── PRIORITY: confirm icon ───────────── */
+.confirm-btn {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--success);
+  background: var(--surface);
+  border: 2px solid color-mix(in srgb, var(--success) 45%, var(--border));
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.confirm-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.confirm-btn.pending:not(:disabled) {
+  color: var(--primary-ink);
+  background: var(--primary);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-soft);
+}
+.confirm-hint {
+  color: var(--warn);
+}
+
+/* ───────────── SPLIT BAR (timer + log day) ───────────── */
+.splitbar {
+  display: grid;
+  gap: 0.35rem;
+  width: 100%;
+}
+.splitbar-track {
+  position: relative;
+  height: 2.6rem;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: visible;
+  touch-action: none;
+}
+.split-piece {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  min-width: 0;
+  box-shadow: inset -1px 0 0 var(--border);
+}
+.split-piece.unlogged {
+  background: transparent;
+}
+.split-piece.labeled {
+  background: color-mix(in srgb, var(--primary) 32%, var(--surface));
+}
+.split-piece.locked {
+  cursor: not-allowed;
+  opacity: 1;
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--muted) 28%, transparent) 0 6px,
+    transparent 6px 12px
+  );
+}
+.split-piece.selected {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  z-index: 1;
+}
+.split-handle {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  width: 22px;
+  margin-left: -11px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ew-resize;
+  z-index: 2;
+  touch-action: none;
+}
+.split-handle::after {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--primary);
+}
+.split-handle:focus-visible::after {
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+.splitbar-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.split-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+.split-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.4rem 0.7rem;
+  text-align: left;
+  font-size: 0.875rem;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.split-row.selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.split-row.unlogged .split-row-label {
+  color: var(--muted);
+  font-style: italic;
+}
+.split-row.locked {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+.split-row-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.split-row-label {
+  overflow-wrap: anywhere;
+}
+.piece-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.6rem;
+  width: 100%;
+}
+.piece-range label {
+  display: grid;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.timer-split {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+.day-split,
+.piece-editor {
+  display: grid;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+.piece-editor {
+  margin-bottom: 0;
+}
+.piece-input {
+  width: 100%;
+}
+.entry-meta {
+  display: block;
+  font-size: 0.8rem;
+}

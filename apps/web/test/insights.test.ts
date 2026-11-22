@@ -6,7 +6,7 @@ import {
   clampWindow,
   deviationPoints,
   focusPoints,
-  logDeviation,
+  logSlices,
   matchSpan,
   spanWindow,
   timeTicks,
@@ -47,17 +47,21 @@ describe("deviationPoints", () => {
     expect(points).toEqual([{ key: `d:${t}|A;B;`, t, seconds: 7200, value: 10, title: "A;B;", detail: "✓ pressed" }]);
   });
 
-  it("a timed log (timer or manual) is scored against the order(s) in force while it ran", () => {
+  it("a timed log (timer or manual) gets one slice per confirmed order in force while it ran, each with its #1 and own score", () => {
     const history = [
-      { at: at(10), titles: ["A", "X", "B", "C"] },
-      { at: at(10, 30), titles: ["X", "A", "B", "C"] },
+      { at: at(10), titles: ["A", "X", "B", "C"], confirmed: true },
+      { at: at(10, 30), titles: ["X", "A", "B", "C"], confirmed: true },
     ];
-    expect(logDeviation(timed("A", at(10), 60), history)).toBe(10);
-    expect(logDeviation(timed("A", at(10), 30, "manual"), history)).toBe(0);
-    expect(logDeviation(timed("X", at(10, 30), 30, "manual"), history)).toBe(0);
-    expect(logDeviation(timed("A", at(9), 30), history)).toBeNull(); // before the history began
-    const [p] = deviationPoints([timed("A", at(10), 60)], history);
-    expect(p).toMatchObject({ t: at(11), value: 10, title: "A", detail: "10:00 – 11:00" });
+    expect(logSlices(timed("A", at(10), 60), history).map((s) => [s.start, s.end, s.top, s.deviation])).toEqual([
+      [at(10), at(10, 30), "A", 0],
+      [at(10, 30), at(11), "X", 20],
+    ]);
+    expect(logSlices(timed("A", at(9), 30, "manual"), history).map((s) => s.deviation)).toEqual([null]); // before the history began
+    const points = deviationPoints([timed("A", at(10), 60)], history);
+    expect(points.map((p) => [p.t, p.value, p.seconds, p.detail])).toEqual([
+      [at(10, 30), 0, 1800, "10:00 – 10:30 · priority: A"],
+      [at(11), 20, 1800, "10:30 – 11:00 · priority: X"],
+    ]);
   });
 });
 

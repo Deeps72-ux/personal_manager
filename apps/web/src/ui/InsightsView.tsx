@@ -173,7 +173,7 @@ export function InsightsView() {
 
       {hours.length === 0 && logs.length === 0 && (
         <p className="hint">
-          Nothing scored in this period. Each log gets a deviation from the priority order while it ran; each clock
+          Nothing scored in this period. Each log gets a deviation per confirmed priority order in force while it ran; each clock
           hour you logged gets a focus score from how often you switched.
         </p>
       )}

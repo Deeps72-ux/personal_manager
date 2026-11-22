@@ -42,12 +42,27 @@ export function splitPriority(
 }
 
 /**
- * The order scores are taken against: the top task, then the queue (oldest
- * first: all of it is high priority), then the rest of the list.
+ * Titles to tap in the TIMER and the LOG: the visible list, then the queue
+ * (oldest first). The queue is offered for convenience only: it is never
+ * part of the scoring order.
  */
-export function scoringOrder(tasks: readonly Task[], placements: readonly Placement[]): Task[] {
+export function pickOrder(tasks: readonly Task[], placements: readonly Placement[]): Task[] {
   const { list, queue } = splitPriority(tasks, placements);
-  return [...list.slice(0, 1), ...queue.map((q) => q.task), ...list.slice(1)];
+  return [...list, ...queue.map((q) => q.task)];
+}
+
+/** Titles of the visible list, best first: what the confirm icon snapshots. */
+export const visibleTitles = (tasks: readonly Task[], placements: readonly Placement[]): string[] =>
+  splitPriority(tasks, placements).list.map((t) => t.title);
+
+/**
+ * True when the confirm icon can be pressed: the visible list is not empty
+ * and its order differs from the latest CONFIRMED snapshot.
+ */
+export function canConfirm(titles: readonly string[], latest: { titles: readonly string[] } | null): boolean {
+  if (titles.length === 0) return false;
+  if (!latest) return true;
+  return latest.titles.length !== titles.length || latest.titles.some((t, i) => t !== titles[i]);
 }
 
 export function sortedRanks(placements: readonly Placement[]): string[] {

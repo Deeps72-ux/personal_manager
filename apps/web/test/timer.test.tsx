@@ -236,7 +236,7 @@ describe("TimerView task cards", () => {
     expect(all.map((l) => [l.taskTitle, l.source, l.startMs])).toEqual([["Gym", "timer", T0 - 60_000]]);
   });
 
-  it("lists the top task, then the waiting queue, then the rest", async () => {
+  it("lists the priority list, then the waiting queue (offered, never scored)", async () => {
     const app = await renderTimer();
     for (const t of ["C", "B", "A"]) await act(() => app.tasks.create({ title: t }));
     const { PriorityActions } = await import("../src/core/actions.ts");
@@ -246,6 +246,52 @@ describe("TimerView task cards", () => {
     enter();
     await act(async () => undefined);
     const items = within(screen.getByRole("list", { name: "Tasks" })).getAllByRole("button");
-    expect(items.map((b) => b.textContent)).toEqual(["A", "C", "B"]);
+    expect(items.map((b) => b.textContent)).toEqual(["A", "B", "C"]);
+  });
+});
+
+describe("TimerView split bar", () => {
+  it("✂ cuts the time in two; each piece gets its own activity (or none) and ✓ logs them all", async () => {
+    const app = await renderTimer(T0 - 2 * 3_600_000);
+    enter();
+    await wait(400); // past the ghost-tap guard
+    fireEvent.click(screen.getByRole("button", { name: "Split the time" }));
+    const rows = () => [...document.querySelectorAll(".split-row")].map((r) => r.querySelector(".split-row-label")!.textContent);
+    expect(rows()).toEqual(["unlogged", "unlogged"]);
+    const piece = () => screen.getByRole("textbox", { name: "What did you do in this piece?" });
+    fireEvent.change(piece(), { target: { value: "Lunch" } }); // the new (second) piece is picked
+    fireEvent.click(document.querySelectorAll<HTMLButtonElement>(".split-row")[0]!);
+    fireEvent.change(piece(), { target: { value: "Reading;" } });
+    expect(rows()).toEqual(["Reading;", "Lunch"]);
+
+    // A third piece left unlogged: cut the last one again, leave it empty.
+    fireEvent.click(document.querySelectorAll<HTMLButtonElement>(".split-row")[1]!);
+    fireEvent.click(screen.getByRole("button", { name: "Split this piece" }));
+    expect(rows()).toEqual(["Reading;", "Lunch", "unlogged"]);
+
+    await act(async () => void fireEvent.click(ok()));
+    const logs = (await app.store.listLogsForDay(DAY0)).sort((a, b) => a.startMs! - b.startMs!);
+    expect(logs.map((l) => [l.taskTitle, l.startMs, l.seconds])).toEqual([
+      ["Reading", T0 - 2 * 3_600_000, 3600],
+      ["Lunch", T0 - 3_600_000, 1800],
+    ]);
+    expect(await app.store.timerStart()).toBe(T0 + 400);
+    expect(queryButton()).not.toBeNull(); // back to the button
+  });
+
+  it("dividers move with the arrow keys, one minute at a time (Shift: 15), never under a minute", async () => {
+    await renderTimer(T0 - 10 * 60_000);
+    enter();
+    await wait(400);
+    fireEvent.click(screen.getByRole("button", { name: "Split the time" }));
+    const handle = () => screen.getByRole("button", { name: /^Divider at/ });
+    const lens = () => [...document.querySelectorAll(".split-row-len")].map((r) => r.textContent);
+    expect(lens()).toEqual(["5m", "5m"]);
+    fireEvent.keyDown(handle(), { key: "ArrowRight" });
+    expect(lens()).toEqual(["6m", "4m"]);
+    fireEvent.keyDown(handle(), { key: "ArrowRight", shiftKey: true });
+    expect(lens()).toEqual(["9m", "1m"]); // stops 1 minute before the end
+    fireEvent.keyDown(handle(), { key: "Delete" });
+    expect(lens()).toEqual(["10m"]);
   });
 });

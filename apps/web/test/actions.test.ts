@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { MemoryStore } from "../src/adapters/memory-store.ts";
 import { LogActions, PriorityActions, TaskActions, TimerActions } from "../src/core/actions.ts";
 import { ValidationError } from "../src/core/errors.ts";
-import { priorityOrder, scoringOrder, splitPriority } from "../src/core/views.ts";
+import { singleSegment, splitAt, type Segment } from "../src/core/split.ts";
+import { priorityOrder, splitPriority } from "../src/core/views.ts";
+
+/** Local time on 5 Nov 2026 (or another day), as epoch ms. */
+const at = (h: number, m = 0, day = 5) => new Date(2026, 10, day, h, m).getTime();
 
 function setup() {
   const store = new MemoryStore();
@@ -27,14 +31,9 @@ describe("TaskActions", () => {
     expect(await app.order()).toEqual(["second", "first"]);
     const second = (await app.store.listTasks()).find((t) => t.title === "second")!;
     expect(second).toMatchObject({ description: "notes", dueDate: "2026-11-10" });
-    // Each change to the order also appends a PRIORITY HISTORY snapshot.
-    expect((await app.store.listOutbox()).map((c) => c.op)).toEqual([
-      "createTask",
-      "recordPriority",
-      "createTask",
-      "recordPriority",
-    ]);
-    expect((await app.store.listHistory()).map((h) => h.titles)).toEqual([["first"], ["second", "first"]]);
+    // Nothing is snapshotted until the order is confirmed.
+    expect((await app.store.listOutbox()).map((c) => c.op)).toEqual(["createTask", "createTask"]);
+    expect(await app.store.listHistory()).toEqual([]);
     expect(app.syncRequests()).toBe(2);
   });
 
@@ -63,7 +62,7 @@ describe("TaskActions", () => {
   it("remove deletes the card but leaves logs alone", async () => {
     const app = setup();
     const t = await app.tasks.create({ title: "Task7" });
-    await app.logs.add("2026-11-05", 27, "Task7");
+    await app.logs.add("2026-11-05", 27, "Task7", at(9));
     await app.tasks.remove(t.id);
     expect(await app.store.listTasks()).toEqual([]);
     expect(await app.store.listPlacements()).toEqual([]);
@@ -92,11 +91,11 @@ describe("PriorityActions", () => {
     expect(await app.order()).toEqual(["D", "A", "B", "C"]);
   });
 
-  it("the WAITING QUEUE: a queued card leaves the list, ranks right after the top task, oldest first", async () => {
+  it("the WAITING QUEUE: a queued card leaves the visible list, oldest first, and is never snapshotted", async () => {
     const app = setup();
     for (const t of ["D", "C", "B", "A"]) await app.tasks.create({ title: t }); // A, B, C, D
     const id = async (title: string) => (await app.store.listTasks()).find((t) => t.title === title)!.id;
-    const t0 = Date.now() + 1000; // after the snapshots taken when the tasks were made
+    const t0 = Date.now() + 1000;
     await app.priority.enqueue(await id("C"), t0);
     await app.priority.enqueue(await id("D"), t0 + 1000);
     await app.priority.enqueue(await id("C"), t0 + 2000); // already waiting: unchanged
@@ -106,37 +105,32 @@ describe("PriorityActions", () => {
       ["C", t0],
       ["D", t0 + 1000],
     ]);
-    expect(scoringOrder(await app.store.listTasks(), await app.store.listPlacements()).map((t) => t.title)).toEqual([
-      "A",
-      "C",
-      "D",
-      "B",
-    ]);
-    expect((await app.store.listHistory()).at(-1)!.titles).toEqual(["A", "C", "D", "B"]);
-
-    // Deleting a queued task (TASKS tab) also takes it out of the queue.
-    await app.tasks.remove(await id("C"), t0 + 3000);
-    expect((await app.store.listHistory()).at(-1)!.titles).toEqual(["A", "D", "B"]);
+    expect(await app.store.listHistory()).toEqual([]); // queuing is not a confirm
+    await app.priority.confirm(t0 + 3000);
+    expect((await app.store.listHistory()).map((h) => [h.at, h.titles, h.confirmed])).toEqual([[t0 + 3000, ["A", "B"], true]]);
   });
 
-  it("pulling a task out of the queue puts it back SECOND in the list, kept, and it waits from zero if re-queued", async () => {
+  it("pulling a task out of the queue puts it back on TOP (#1); the last one pulled out ends up first", async () => {
     const app = setup();
     for (const t of ["D", "C", "B", "A"]) await app.tasks.create({ title: t }); // A, B, C, D
     const id = async (title: string) => (await app.store.listTasks()).find((t) => t.title === title)!.id;
     const t0 = Date.now() + 1000;
     await app.priority.enqueue(await id("D"), t0);
-    await app.priority.dequeue(await id("D"), t0 + 1000);
+    await app.priority.enqueue(await id("C"), t0 + 1);
+    await app.priority.dequeue(await id("D"));
     const now = async () => splitPriority(await app.store.listTasks(), await app.store.listPlacements());
-    expect((await now()).list.map((t) => t.title)).toEqual(["A", "D", "B", "C"]);
+    expect((await now()).list.map((t) => t.title)).toEqual(["D", "A", "B"]);
+    await app.priority.dequeue(await id("C"));
+    expect((await now()).list.map((t) => t.title)).toEqual(["C", "D", "A", "B"]);
     expect((await now()).queue).toEqual([]);
     expect((await app.store.listTasks()).map((t) => t.title).sort()).toEqual(["A", "B", "C", "D"]); // not deleted
     expect((await app.store.listOutbox()).map((c) => c.op)).toContain("dequeueTask");
-    expect((await app.store.listHistory()).at(-1)!.titles).toEqual(["A", "D", "B", "C"]);
+    expect(await app.store.listHistory()).toEqual([]); // waits for the confirm icon
 
     await app.priority.enqueue(await id("D"), t0 + 5000);
     expect((await now()).queue.map((q) => q.queuedAt)).toEqual([t0 + 5000]);
-    await app.priority.dequeue(await id("A"), t0 + 6000); // not queued: nothing happens
-    expect((await now()).list.map((t) => t.title)).toEqual(["A", "B", "C"]);
+    await app.priority.dequeue(await id("A")); // not queued: nothing happens
+    expect((await now()).list.map((t) => t.title)).toEqual(["C", "A", "B"]);
   });
 
   it("pulled out with the list empty, it becomes the top task", async () => {
@@ -160,17 +154,45 @@ describe("PriorityActions", () => {
     ]);
   });
 
-  it("reconcileHistory records the current order only when it differs from the latest snapshot", async () => {
+  it("CONFIRM: reorders only count once confirmed, time-stamped at the press; refused when unchanged or empty", async () => {
     const app = setup();
-    await app.priority.reconcileHistory(5);
-    expect(await app.store.listHistory()).toEqual([]); // nothing to record
+    expect(await app.priority.confirm(5)).toBe(false); // empty list
+    for (const t of ["C", "B", "A"]) await app.tasks.create({ title: t }); // A, B, C
+    const id = async (title: string) => (await app.store.listTasks()).find((t) => t.title === title)!.id;
+    expect(await app.priority.confirm(100)).toBe(true);
+    expect(await app.priority.confirm(150)).toBe(false); // same order
+    await app.priority.move(await id("C"), 0);
+    await app.priority.move(await id("A"), 0);
+    await app.priority.move(await id("C"), 0); // C, A, B: only the final order matters
+    expect((await app.store.listHistory()).length).toBe(1);
+    expect(await app.priority.confirm(200)).toBe(true);
+    await app.tasks.create({ title: "New" }); // on top, but not scored until confirmed
+    await app.tasks.remove(await id("B"));
+    expect((await app.store.listHistory()).map((h) => [h.at, h.titles])).toEqual([
+      [100, ["A", "B", "C"]],
+      [200, ["C", "A", "B"]],
+    ]);
+    expect(app.syncRequests()).toBeGreaterThan(0);
+  });
+
+  it("upgrade: legacy history and nothing confirmed → today's visible list is confirmed once; a new user is left alone", async () => {
+    const fresh = setup();
+    await fresh.tasks.create({ title: "x" });
+    await fresh.priority.ensureConfirmedStart(10);
+    expect(await fresh.store.listHistory()).toEqual([]); // no legacy history: unscored until the first confirm
+
+    const app = setup();
     await app.store.write(async (tx) => {
       await tx.putTask({ id: "0190a000-0000-7000-8000-00000000000a", title: "Synced", description: null, dueDate: null });
       await tx.putPlacement({ taskId: "0190a000-0000-7000-8000-00000000000a", rank: "a0" });
+      await tx.putSnapshot({ id: "0190a000-0000-7000-8000-0000000000b1", at: 5, titles: ["Old", "Synced"] });
     });
-    await app.priority.reconcileHistory(10);
-    await app.priority.reconcileHistory(20);
-    expect((await app.store.listHistory()).map((h) => [h.at, h.titles])).toEqual([[10, ["Synced"]]]);
+    await app.priority.ensureConfirmedStart(10);
+    await app.priority.ensureConfirmedStart(20);
+    expect((await app.store.listHistory()).map((h) => [h.at, h.titles, h.confirmed ?? null])).toEqual([
+      [5, ["Old", "Synced"], null],
+      [10, ["Synced"], true],
+    ]);
   });
 
   it("moving an unknown card does nothing", async () => {
@@ -181,97 +203,69 @@ describe("PriorityActions", () => {
 });
 
 describe("LogActions", () => {
-  it("accepts number or text seconds, same task many times a day", async () => {
+  it("accepts number or text seconds, exactly where asked", async () => {
     const app = setup();
-    expect(await app.logs.add("2026-11-05", "8*60*60", "Sleep")).toMatchObject({ ok: true });
-    expect(await app.logs.add("2026-11-05", 27, "Task7")).toMatchObject({ ok: true });
-    expect(await app.logs.add("2026-11-05", "33", "Task7")).toMatchObject({ ok: true });
+    const r = await app.logs.add("2026-11-05", "8*60*60", "Sleep", at(0));
+    expect(r.ok && r.entry).toMatchObject({ startMs: at(0), seconds: 28_800, source: "manual", focus: null });
+    expect(await app.logs.add("2026-11-05", 27, "Task7", at(9))).toMatchObject({ ok: true });
+    expect(await app.logs.add("2026-11-05", "33", "Task7", at(10))).toMatchObject({ ok: true });
     const day = await app.store.listLogsForDay("2026-11-05");
     expect(day.map((l) => l.seconds).sort((a, b) => a - b)).toEqual([27, 33, 28_800]);
   });
 
-  it("manual logs go to the earliest free gap that holds them whole, placed on the clock", async () => {
+  it("time already taken (another log, the running TIMER) or outside the day is refused, nothing written", async () => {
     const app = setup();
     const day = "2026-11-05";
-    const midnight = new Date(2026, 10, 5).getTime();
-    const r = await app.logs.add(day, "1h", "a");
-    expect(r.ok && r.entry).toMatchObject({ startMs: midnight, seconds: 3600, source: "manual", focus: null });
-    expect(await app.logs.propose(day, "30m", "b")).toEqual({
-      ok: true,
-      seconds: 1800,
-      startMs: midnight + 3_600_000,
-      endMs: midnight + 5_400_000,
-    });
+    await app.logs.add(day, "1h", "a", at(9));
+    const outbox = (await app.store.listOutbox()).length;
+    expect(await app.logs.add(day, "1h", "b", at(9, 30))).toMatchObject({ ok: false, error: expect.stringContaining("no longer free") });
+    expect(await app.logs.add(day, "2h", "b", at(23))).toMatchObject({ ok: false, error: expect.stringContaining("outside") });
+    await app.timer.restart(at(20)); // running since 20:00
+    expect(await app.logs.add(day, "1m", "b", at(20, 30))).toMatchObject({ ok: false });
+    expect(await app.logs.add("2026-11-06", 60, "b", at(1, 0, 6))).toMatchObject({ ok: false }); // the timer covers later days too
+    expect((await app.store.listOutbox()).length).toBe(outbox + 1); // only the restart
+    expect(await app.logs.add(day, "1h", "b", at(10))).toMatchObject({ ok: true }); // right after "a": fine
   });
 
-  it("no free time, or no gap long enough: refused, nothing written", async () => {
+  it("addPieces: every labeled piece of the day's split bar becomes a log; same-activity neighbours merge; unlogged skipped", async () => {
     const app = setup();
     const day = "2026-11-05";
-    expect(await app.logs.add(day, "23h", "a")).toMatchObject({ ok: true });
-    const over = await app.logs.add(day, "1h1s", "b");
-    expect(over).toMatchObject({ ok: false, error: expect.stringContaining("the longest is 1h") });
-    expect(await app.logs.add(day, "1h", "b")).toMatchObject({ ok: true }); // fills the day
-    expect(await app.logs.add(day, 1, "c")).toMatchObject({ ok: false, error: expect.stringContaining("remove a log") });
-    expect(await app.logs.add("2026-11-06", 1, "c")).toMatchObject({ ok: true }); // other days unaffected
-  });
-
-  it("a gap left by a deleted log is reused; a gap too small is skipped", async () => {
-    const app = setup();
-    const day = "2026-11-05";
-    const midnight = new Date(2026, 10, 5).getTime();
-    const first = await app.logs.add(day, "20m", "a"); // 00:00–00:20
-    await app.logs.add(day, "1h", "b"); // 00:20–01:20
-    if (first.ok) await app.logs.remove(first.entry.id); // 00:00–00:20 free again
-    expect(await app.logs.propose(day, "50m", "c")).toMatchObject({ ok: true, startMs: midnight + 80 * 60_000 });
-    expect(await app.logs.propose(day, "15m", "c")).toMatchObject({ ok: true, startMs: midnight });
-  });
-
-  it("an accepted slot that got taken meanwhile is refused", async () => {
-    const app = setup();
-    const day = "2026-11-05";
-    const p = await app.logs.propose(day, "1h", "a");
-    await app.logs.add(day, "30m", "other"); // another tab / sync took 00:00–00:30
-    if (!p.ok) throw new Error(p.error);
-    expect(await app.logs.add(day, p.seconds, "a", p.startMs)).toMatchObject({ ok: false, error: expect.stringContaining("no longer free") });
-  });
-
-  it("time covered by the running TIMER is never free", async () => {
-    const app = setup();
-    const day = "2026-11-05";
-    await app.timer.restart(new Date(2026, 10, 5, 1).getTime()); // running since 01:00
-    expect(await app.logs.add(day, "1h", "a")).toMatchObject({ ok: true }); // 00:00–01:00
-    expect(await app.logs.add(day, 1, "b")).toMatchObject({ ok: false });
-    expect(await app.logs.add("2026-11-06", 1, "b")).toMatchObject({ ok: false }); // the timer covers later days too
-    expect(await app.logs.add("2026-11-04", "2h", "b")).toMatchObject({ ok: true }); // before it: fine
-  });
-
-  it("older untimed manual logs take the earliest time from midnight", async () => {
-    const app = setup();
-    const day = "2026-11-05";
-    const midnight = new Date(2026, 10, 5).getTime();
-    await app.store.write(async (tx) =>
-      tx.putLog({ id: "0190a000-0000-7000-8000-000000000001", day, seconds: 7200, taskTitle: "old", focus: null, deviation: null }),
-    );
-    expect(await app.logs.propose(day, "1h", "a")).toMatchObject({ ok: true, startMs: midnight + 7_200_000 });
+    let segs: Segment[] = singleSegment(at(9), at(13));
+    segs = splitAt(segs, 0, at(10))!;
+    segs = splitAt(segs, 1, at(11))!;
+    segs = splitAt(segs, 2, at(12))!;
+    segs = segs.map((s, i) => ({ ...s, text: ["Reading;", "reading", "", "Coding;"][i]! }));
+    const r = await app.logs.addPieces(day, segs);
+    expect(r.ok).toBe(true);
+    const logs = (await app.store.listLogsForDay(day)).sort((a, b) => a.startMs! - b.startMs!);
+    expect(logs.map((l) => [l.taskTitle, l.startMs, l.seconds, l.source])).toEqual([
+      ["Reading", at(9), 7200, "manual"],
+      ["Coding", at(12), 3600, "manual"],
+    ]);
+    // The same pieces again: that time is taken now, and nothing is half-saved.
+    expect(await app.logs.addPieces(day, segs)).toMatchObject({ ok: false });
+    expect((await app.store.listLogsForDay(day)).length).toBe(2);
+    expect(await app.logs.addPieces(day, singleSegment(at(14), at(15)))).toMatchObject({ ok: false, error: expect.stringContaining("Label") });
+    expect(await app.logs.addPieces(day, singleSegment(at(14), at(15), "a; b"))).toMatchObject({ ok: false });
   });
 
   it("rejects bad input without writing", async () => {
     const app = setup();
-    expect(await app.logs.add("2026-11-05", "abc", "x")).toMatchObject({ ok: false });
-    expect(await app.logs.add("2026-11-05", 10, "   ")).toMatchObject({ ok: false, error: "Pick a task" });
-    expect(await app.logs.add("2026-02-30", 10, "x")).toMatchObject({ ok: false, error: "Invalid day" });
+    expect(await app.logs.add("2026-11-05", "abc", "x", at(1))).toMatchObject({ ok: false });
+    expect(await app.logs.add("2026-11-05", 10, "   ", at(1))).toMatchObject({ ok: false, error: "Pick a task" });
+    expect(await app.logs.add("2026-02-30", 10, "x", at(1))).toMatchObject({ ok: false, error: "Invalid day" });
     expect(await app.store.listOutbox()).toEqual([]);
   });
 
   it("remove and purge", async () => {
     const app = setup();
-    const r = await app.logs.add("2026-11-05", 10, "x");
-    await app.logs.add("2025-12-31", 10, "old");
+    const r = await app.logs.add("2026-11-05", 10, "x", at(1));
+    await app.logs.add("2025-12-31", 10, "old", new Date(2025, 11, 31, 1).getTime());
     if (r.ok) await app.logs.remove(r.entry.id);
     await app.logs.purgeBefore("2026-01-01");
     expect(await app.store.listLogsBetween("2000-01-01", "2100-01-01")).toEqual([]);
     expect(await app.store.purgedBefore()).toBe("2026-01-01");
-    expect(await app.logs.add("2025-06-01", 10, "x")).toMatchObject({ ok: false });
+    expect(await app.logs.add("2025-06-01", 10, "x", new Date(2025, 5, 1, 1).getTime())).toMatchObject({ ok: false });
     await expect(app.logs.purgeBefore("nope")).rejects.toThrow(ValidationError);
   });
 });
@@ -318,7 +312,7 @@ describe("TimerActions", () => {
 
   it("the timer is not refused by other logs on its days: the time is real (the server settles overlaps)", async () => {
     const app = setup();
-    await app.logs.add("2026-11-06", "23h", "earlier");
+    await app.logs.add("2026-11-06", "23h", "earlier", at(6, 0));
     await app.timer.restart(at(5, 23));
     expect(await app.timer.logAndRestart("y", at(6, 2))).toMatchObject({ ok: true });
     expect(await app.store.timerStart()).toBe(at(6, 2));
@@ -360,6 +354,38 @@ describe("TimerActions", () => {
     await app.timer.restart(at(5, 9));
     const r = await app.timer.logAndRestart("Gym", at(5, 10));
     expect(r.ok && r.entries[0]).toMatchObject({ focus: null, deviation: null, taskTitle: "Gym" });
+  });
+
+  it("SPLIT: each labeled piece is logged, same-activity neighbours merge, unlogged pieces are dropped, the last runs on to now", async () => {
+    const app = setup();
+    await app.timer.restart(at(5, 11));
+    let segs: Segment[] = singleSegment(at(5, 11), at(5, 13)); // bar opened at 13:00
+    segs = splitAt(segs, 0, at(5, 11, 45))!;
+    segs = splitAt(segs, 1, at(5, 12, 40))!;
+    segs = splitAt(segs, 2, at(5, 12, 50))!;
+    segs = segs.map((s, i) => ({ ...s, text: ["Doomscrolling", "doomscrolling;", "", "Lunch"][i]! }));
+    const r = await app.timer.logSegments(segs, at(5, 13, 5)); // ✓ pressed at 13:05
+    if (!r.ok) throw new Error(r.error);
+    const logs = (await app.store.listLogsForDay("2026-11-05")).sort((a, b) => a.startMs! - b.startMs!);
+    expect(logs.map((l) => [l.taskTitle, l.startMs, l.seconds, l.source])).toEqual([
+      ["Doomscrolling", at(5, 11), 100 * 60, "timer"],
+      ["Lunch", at(5, 12, 50), 15 * 60, "timer"],
+    ]);
+    expect(await app.store.timerStart()).toBe(at(5, 13, 5));
+  });
+
+  it("SPLIT: refused when the timer was restarted meanwhile, when nothing is labeled, or a label has two activities", async () => {
+    const app = setup();
+    await app.timer.restart(at(5, 9));
+    const segs = splitAt(singleSegment(at(5, 9), at(5, 10)), 0, at(5, 9, 30))!;
+    expect(await app.timer.logSegments(segs, at(5, 10))).toMatchObject({ ok: false, error: "Type what you did" });
+    expect(await app.timer.logSegments([{ ...segs[0]!, text: "a; b" }, segs[1]!], at(5, 10))).toMatchObject({ ok: false });
+    await app.timer.restart(at(5, 9, 10)); // another device
+    expect(await app.timer.logSegments([{ ...segs[0]!, text: "a" }, segs[1]!], at(5, 10))).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("restarted"),
+    });
+    expect(await titles(app, "2026-11-05")).toEqual([]);
   });
 
   it("refuses blank text and purged days", async () => {

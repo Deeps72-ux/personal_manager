@@ -3,9 +3,10 @@
  * time windows. No storage, no React.
  */
 import {
-  deviationOverTime,
+  deviationSlices,
   uuidv7Time,
   type Day,
+  type DeviationSlice,
   type LogEntry,
   type PriorityAt,
 } from "@pm/shared";
@@ -35,38 +36,44 @@ const clock = (t: number) => {
 };
 
 /**
- * DEVIATION of one log in percent, null if not scored. A log placed on the
- * clock is scored against the priority order(s) in force while it ran
- * (`history` sorted by time); an older log keeps the score stored on it.
+ * One log cut at every confirmed priority change while it ran: each slice
+ * shows the #1 task in force then and its own DEVIATION (no average over the
+ * whole log). An older log with no clock time is one slice with the score
+ * stored on it, if any.
  */
-export function logDeviation(e: LogEntry, history: readonly PriorityAt[]): number | null {
-  if (e.startMs !== null && e.startMs !== undefined) {
-    return deviationOverTime(e.taskTitle, e.startMs, e.startMs + e.seconds * 1000, history);
-  }
-  return e.deviation ?? null;
+export interface LogSlice extends DeviationSlice {
+  entry: LogEntry;
 }
 
-/**
- * One DEVIATION point per scored log, at its end. Older TIMER rows of one ✓
- * press that crossed midnight share an id time and are merged.
- */
+export function logSlices(e: LogEntry, history: readonly PriorityAt[]): LogSlice[] {
+  if (e.startMs !== null && e.startMs !== undefined) {
+    return deviationSlices(e.taskTitle, e.startMs, e.startMs + e.seconds * 1000, history).map((s) => ({ ...s, entry: e }));
+  }
+  return [];
+}
+
+/** One DEVIATION point per scored slice, at its end. Older logs keep the score stored on them. */
 export function deviationPoints(entries: readonly LogEntry[], history: readonly PriorityAt[]): InsightPoint[] {
   const out = new Map<string, InsightPoint>();
   for (const e of entries) {
-    const value = logDeviation(e, history);
-    if (value === null) continue;
     if (e.startMs !== null && e.startMs !== undefined) {
-      const end = e.startMs + e.seconds * 1000;
-      out.set(`d:${e.id}`, {
-        key: `d:${e.id}`,
-        t: end,
-        seconds: e.seconds,
-        value,
-        title: e.taskTitle,
-        detail: `${clock(e.startMs)} – ${clock(end)}`,
-      });
+      for (const s of logSlices(e, history)) {
+        if (s.deviation === null) continue;
+        const key = `d:${e.id}:${s.start}`;
+        out.set(key, {
+          key,
+          t: s.end,
+          seconds: Math.round((s.end - s.start) / 1000),
+          value: s.deviation,
+          title: e.taskTitle,
+          detail: `${clock(s.start)} – ${clock(s.end)}${s.top ? ` · priority: ${s.top}` : ""}`,
+        });
+      }
       continue;
     }
+    // Older TIMER rows of one ✓ press that crossed midnight share an id time and are merged.
+    const value = e.deviation ?? null;
+    if (value === null) continue;
     const t = uuidv7Time(e.id);
     const key = `d:${t}|${e.taskTitle}`;
     const p = out.get(key);

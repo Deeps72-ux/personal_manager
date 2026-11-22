@@ -54,7 +54,7 @@ describe("SyncEngine retries by itself", () => {
     await new TaskActions({ store, sync }).create({ title: "made during a blip" });
 
     await waitFor(() => received.length > 0);
-    expect(received.map((c) => c.op)).toEqual(["createTask", "recordPriority"]); // + its history snapshot
+    expect(received.map((c) => c.op)).toEqual(["createTask"]); // no snapshot until the order is confirmed
     await waitFor(() => sync.getStatus().state === "idle");
     expect(sync.getStatus().pending).toBe(0);
     sync.stop();

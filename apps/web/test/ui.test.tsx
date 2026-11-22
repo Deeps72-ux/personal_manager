@@ -2,7 +2,7 @@
 /**
  * UI flows in a simulated browser, with in-memory adapters (no server).
  */
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import { todayLocal, type Change, type PullResponse } from "@pm/shared";
@@ -127,42 +127,75 @@ describe("PWA UI", () => {
     );
   });
 
-  it("LOG: calendar → day → pick card → duration → accept the proposed slot; refuses what cannot fit", async () => {
+  it("LOG: the day's 24 hours as a split bar: pick exact ranges, label them, save; each log shows its priority slices", async () => {
     const { user, services } = renderApp();
     await signUp(user);
     await services.tasks.create({ title: "Sleep" });
-    await services.tasks.create({ title: "Task7" });
+    await services.tasks.create({ title: "Task7" }); // list: Task7, Sleep
+    const day = todayLocal();
+    const [y, m, d] = day.split("-").map(Number) as [number, number, number];
+    const at = (h: number) => new Date(y, m - 1, d, h).getTime();
+    await services.priority.confirm(at(0) - 1000); // Task7 is #1 from before midnight
+    const sleep = (await services.store.listTasks()).find((t) => t.title === "Sleep")!;
+    await services.priority.move(sleep.id, 0);
+    await services.priority.confirm(at(4)); // Sleep is #1 from 04:00
 
     await user.click(nav().getByRole("button", { name: /Log/ }));
-    await user.click(await screen.findByRole("gridcell", { name: new RegExp(`^${todayLocal()}`) }));
+    await user.click(await screen.findByRole("gridcell", { name: new RegExp(`^${day}`) }));
 
-    await user.click(screen.getByRole("button", { name: "Sleep" }));
-    await user.type(screen.getByLabelText("Seconds for Sleep"), "8*60*60");
-    expect(screen.getByText("= 28,800 s (8h)")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Find a slot" }));
-    expect(await screen.findByText(/00:00 – 08:00/)).toBeTruthy(); // asks first
-    expect(await services.store.listLogsForDay(todayLocal())).toEqual([]);
-    await user.click(screen.getByRole("button", { name: "Accept" }));
+    const rows = () =>
+      [...document.querySelectorAll(".split-row")].map(
+        (r) => `${r.querySelector(".split-row-time")!.textContent} ${r.querySelector(".split-row-label")!.textContent}`,
+      );
+    await waitFor(() => expect(rows()).toEqual(["00:00–00:00 unlogged"]));
+    const range = (from: string, to: string) => {
+      fireEvent.change(screen.getByLabelText("From"), { target: { value: from } });
+      fireEvent.change(screen.getByLabelText("To"), { target: { value: to } });
+    };
+    range("00:00", "08:00");
+    await user.click(screen.getByRole("button", { name: "Sleep" })); // tap a card to fill the picked piece
+    await user.click(screen.getByRole("button", { name: /^08:00–00:00/ }));
+    range("08:00", "08:30");
+    await user.type(screen.getByLabelText("Activity from 08:00 to 08:30"), "Task7");
+    expect(rows()).toEqual(["00:00–08:00 Sleep;", "08:00–08:30 Task7", "08:30–00:00 unlogged"]);
+    expect(await services.store.listLogsForDay(day)).toEqual([]); // nothing saved yet
+
+    await user.click(screen.getByRole("button", { name: "Log 2 pieces" }));
     const entries = () => within(document.querySelector(".entries") as HTMLElement);
-    await waitFor(() => expect(entries().getByText("00:00–08:00")).toBeTruthy());
-
-    await user.click(screen.getByRole("button", { name: "Task7" }));
-    await user.type(screen.getByLabelText("Seconds for Task7"), "17h");
-    expect(screen.getByText(/No free slot that long: the longest is 16h/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Find a slot" })).toHaveProperty("disabled", true);
-    await user.clear(screen.getByLabelText("Seconds for Task7"));
-    await user.type(screen.getByLabelText("Seconds for Task7"), "30m");
-    await user.click(screen.getByRole("button", { name: "Find a slot" }));
-    await user.click(await screen.findByRole("button", { name: "Accept" }));
-    await waitFor(() => expect(entries().getByText("08:00–08:30")).toBeTruthy());
-    expect(screen.getByText("8h 30m")).toBeTruthy(); // logged so far
+    // Sleep ran under two confirmed orders: one slice each, with that order's #1 and its own score.
+    await waitFor(() => expect(entries().getByText("00:00–04:00")).toBeTruthy());
+    const text = [...document.querySelectorAll(".entries .entry")].map((li) => li.textContent);
+    expect(text[0]).toContain("priority: Task7 · deviation 33.3%");
+    expect(text[1]).toContain("04:00–08:00");
+    expect(text[1]).toContain("priority: Sleep · deviation 0%");
+    expect(text[2]).toContain("08:00–08:30");
+    expect(text[2]).toContain("priority: Sleep · deviation 33.3%");
+    // Logged time is locked on the bar now.
+    await waitFor(() => expect(rows()[0]).toBe("00:00–08:30 Sleep / Task7"));
+    expect(screen.getByRole("button", { name: /^00:00–08:30/ })).toHaveProperty("disabled", true);
 
     await user.click(screen.getByRole("button", { name: "Delete Task7 entry" }));
     await waitFor(() => expect(entries().queryByText("08:00–08:30")).toBeNull());
 
     // back to the calendar: today shows its total
     await user.click(screen.getByRole("button", { name: "Back to calendar" }));
-    expect(await screen.findByRole("gridcell", { name: `${todayLocal()}, 8h logged` })).toBeTruthy();
+    expect(await screen.findByRole("gridcell", { name: `${day}, 8h logged` })).toBeTruthy();
+  });
+
+  it("PRIORITY: ✓ is pressable only when the order differs from the confirmed one", async () => {
+    const { user, services } = renderApp();
+    await signUp(user);
+    for (const t of ["B", "A"]) await services.tasks.create({ title: t });
+    await user.click(nav().getByRole("button", { name: /Priority/ }));
+    const confirm = await screen.findByRole("button", { name: "Confirm this priority order" });
+    expect(screen.getByText(/Nothing confirmed yet/)).toBeTruthy();
+    await user.click(confirm);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Priority order confirmed" })).toHaveProperty("disabled", true));
+    expect((await services.store.listHistory()).map((h) => [h.titles, h.confirmed])).toEqual([[["A", "B"], true]]);
+    const b = (await services.store.listTasks()).find((t) => t.title === "B")!;
+    await services.priority.move(b.id, 0);
+    expect(await screen.findByText(/Order changed: scores still use the last confirmed order/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Confirm this priority order" })).toHaveProperty("disabled", false);
   });
 
   it("PRIORITY: the waiting queue opens as a pipeline, oldest at the bottom, and the icon heats up", async () => {
@@ -217,7 +250,7 @@ describe("PWA UI", () => {
   it("export and purge tools", async () => {
     const { user, saved, services } = renderApp();
     await signUp(user);
-    await services.logs.add("2025-12-31", 60, "old");
+    await services.logs.add("2025-12-31", 60, "old", new Date(2025, 11, 31, 9).getTime());
 
     await user.click(nav().getByRole("button", { name: /Log/ }));
     await user.click(screen.getByRole("button", { name: "Export / clean up" }));

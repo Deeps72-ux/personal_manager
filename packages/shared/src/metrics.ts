@@ -88,11 +88,6 @@ export const activityKey = (title: string): string => {
 
 // ───────────── deviation from the priority history ─────────────
 
-export interface PriorityAt {
-  at: number;
-  titles: readonly string[];
-}
-
 /** D of one activity against one list: 100·(m − 1)/(n + 1); not listed → m = n + 1. Null if the list is empty. */
 export function rankDeviation(activity: string, titles: readonly string[]): number | null {
   const n = titles.length;
@@ -103,31 +98,75 @@ export function rankDeviation(activity: string, titles: readonly string[]): numb
   return (100 * (m - 1)) / (n + 1);
 }
 
+export interface PriorityAt {
+  at: number;
+  titles: readonly string[];
+  confirmed?: boolean | null | undefined;
+}
+
 /**
- * D of one activity done during [startMs, endMs), when the priority order may
- * have changed while it ran: each piece is scored against the order in force
- * then, and the pieces are averaged by time. `history` must be sorted by `at`.
- * Time before the first snapshot (or under an empty list) has no reference
- * and is left out. Null if no part of the span has a reference.
+ * The snapshots scores are taken against, sorted by time. Once a CONFIRMED
+ * snapshot exists, only confirmed ones count from the first of them on;
+ * legacy ones (taken automatically by older versions, possibly still sent by
+ * a device that was not updated yet) only cover the time before it.
  */
-export function deviationOverTime(
+export function scoringHistory<T extends PriorityAt>(history: readonly T[]): T[] {
+  const sorted = [...history].sort((a, b) => a.at - b.at);
+  const first = sorted.find((s) => s.confirmed === true);
+  if (!first) return sorted;
+  return sorted.filter((s) => (s.confirmed === true ? true : s.at < first.at));
+}
+
+/** The latest confirmed snapshot, if any. */
+export function latestConfirmed<T extends PriorityAt>(history: readonly T[]): T | null {
+  let out: T | null = null;
+  for (const s of history) if (s.confirmed === true && (!out || s.at >= out.at)) out = s;
+  return out;
+}
+
+/**
+ * One part of a log scored against ONE snapshot. `top`: that snapshot's #1
+ * task; `deviation`: the activity's D against it. Both null when no
+ * snapshot was in force (before the first one ever).
+ */
+export interface DeviationSlice {
+  start: number;
+  end: number;
+  top: string | null;
+  deviation: number | null;
+}
+
+/**
+ * Cut [startMs, endMs) wherever the scoring snapshot changed, and score each
+ * part on its own (no average over the whole log). `history` is the raw
+ * PRIORITY HISTORY; `scoringHistory` is applied here. Neighbouring parts with
+ * the same #1 task and the same score are joined.
+ */
+export function deviationSlices(
   activity: string,
   startMs: number,
   endMs: number,
   history: readonly PriorityAt[],
-): number | null {
-  let sum = 0;
-  let weight = 0;
-  for (let k = 0; k < history.length; k++) {
-    const from = Math.max(startMs, history[k]!.at);
-    const to = Math.min(endMs, history[k + 1]?.at ?? Infinity);
+): DeviationSlice[] {
+  if (endMs <= startMs) return [];
+  const h = scoringHistory(history);
+  const out: DeviationSlice[] = [];
+  const push = (s: DeviationSlice) => {
+    if (s.end <= s.start) return;
+    const last = out.at(-1);
+    if (last && last.end === s.start && last.top === s.top && last.deviation === s.deviation) last.end = s.end;
+    else out.push(s);
+  };
+  const firstAt = h[0]?.at ?? Infinity;
+  push({ start: startMs, end: Math.min(endMs, firstAt), top: null, deviation: null });
+  for (let k = 0; k < h.length; k++) {
+    const from = Math.max(startMs, h[k]!.at);
+    const to = Math.min(endMs, h[k + 1]?.at ?? Infinity);
     if (to <= from) continue;
-    const d = rankDeviation(activity, history[k]!.titles);
-    if (d === null) continue;
-    sum += d * (to - from);
-    weight += to - from;
+    const titles = h[k]!.titles;
+    push({ start: from, end: to, top: titles[0] ?? null, deviation: rankDeviation(activity, titles) });
   }
-  return weight === 0 ? null : sum / weight;
+  return out;
 }
 
 /** FOCUS of one clock hour: 100 / (1 + switches). */

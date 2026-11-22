@@ -43,10 +43,10 @@ export function App() {
     if (!user || user === "loading") return;
     sync.start();
     // After each finished sync the local copy is current: make sure the
-    // PRIORITY HISTORY ends with today's order (first run, older devices).
+    // PRIORITY HISTORY has a confirmed snapshot (first run after the upgrade).
     let last = sync.getStatus().state;
     const off = sync.subscribe((s) => {
-      if (s.state === "idle" && last !== "idle") void priority.reconcileHistory().catch((err) => console.error(err));
+      if (s.state === "idle" && last !== "idle") void priority.ensureConfirmedStart().catch((err: unknown) => console.error(err));
       last = s.state;
     });
     return () => {
