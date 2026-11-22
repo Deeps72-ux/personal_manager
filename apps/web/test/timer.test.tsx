@@ -7,6 +7,7 @@ import { LogActions, TaskActions, TimerActions } from "../src/core/actions.ts";
 import { chipText } from "../src/core/views.ts";
 import { ServicesProvider, type Services } from "../src/ui/services.tsx";
 import { formatElapsed } from "../src/ui/timer-store.ts";
+import { clampView, DOUBLE_TAP_MS, MIN_VIEW_MS, tickTimes } from "../src/ui/SplitBar.tsx";
 import { TimerView } from "../src/ui/TimerView.tsx";
 
 const T0 = new Date("2026-11-07T10:00:00Z").getTime();
@@ -251,23 +252,58 @@ describe("TimerView task cards", () => {
 });
 
 describe("TimerView split bar", () => {
-  it("✂ cuts the time in two; each piece gets its own activity (or none) and ✓ logs them all", async () => {
+  /** The bar is `px` wide on screen (jsdom has no layout). */
+  const layout = (px: number) =>
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: px,
+      bottom: 50,
+      width: px,
+      height: 50,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+  const viewport = () => document.querySelector<HTMLElement>(".splitbar-viewport")!;
+  const tapAt = (x: number) => {
+    fireEvent.pointerDown(viewport(), { pointerId: 1, clientX: x, button: 0, pointerType: "touch" });
+    fireEvent.pointerUp(viewport(), { pointerId: 1, clientX: x, button: 0, pointerType: "touch" });
+  };
+  const doubleTapAt = async (x: number) => {
+    tapAt(x);
+    await wait(80);
+    tapAt(x);
+  };
+  /** Each piece as "length label", from its accessible name. */
+  const pieces = () =>
+    [...document.querySelectorAll<HTMLElement>(".split-piece")].map((b) =>
+      b.getAttribute("aria-label")!.replace(/^\S+ to \S+, (.*?): (.*)$/, "$1 $2"),
+    );
+  const pieceInput = () => screen.getByRole("textbox", { name: /^What did you do/ });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("opens as one piece typed into straight away; double-tap cuts, tap picks, ✓ logs every labeled piece", async () => {
     const app = await renderTimer(T0 - 2 * 3_600_000);
     enter();
     await wait(400); // past the ghost-tap guard
-    fireEvent.click(screen.getByRole("button", { name: "Split the time" }));
-    const rows = () => [...document.querySelectorAll(".split-row")].map((r) => r.querySelector(".split-row-label")!.textContent);
-    expect(rows()).toEqual(["unlogged", "unlogged"]);
-    const piece = () => screen.getByRole("textbox", { name: "What did you do in this piece?" });
-    fireEvent.change(piece(), { target: { value: "Lunch" } }); // the new (second) piece is picked
-    fireEvent.click(document.querySelectorAll<HTMLButtonElement>(".split-row")[0]!);
-    fireEvent.change(piece(), { target: { value: "Reading;" } });
-    expect(rows()).toEqual(["Reading;", "Lunch"]);
+    layout(1200); // 2 hours: 100 px per 10 minutes
+    expect(pieces()).toEqual(["2h unlogged"]);
+    expect(bar()).not.toBeNull(); // the whole time, picked: type right away
 
-    // A third piece left unlogged: cut the last one again, leave it empty.
-    fireEvent.click(document.querySelectorAll<HTMLButtonElement>(".split-row")[1]!);
-    fireEvent.click(screen.getByRole("button", { name: "Split this piece" }));
-    expect(rows()).toEqual(["Reading;", "Lunch", "unlogged"]);
+    await doubleTapAt(600); // 11:00 UTC−… : one hour in
+    await doubleTapAt(902); // snapped to the minute: 30 minutes later
+    expect(pieces()).toEqual(["1h unlogged", "30m unlogged", "30m unlogged"]);
+    expect(screen.queryByRole("textbox")).toBeNull(); // after a cut nothing is picked
+
+    tapAt(700); // one tap: picks the piece after a moment
+    expect(screen.queryByRole("textbox")).toBeNull();
+    await wait(DOUBLE_TAP_MS + 10);
+    fireEvent.change(pieceInput(), { target: { value: "Lunch" } });
+    tapAt(100);
+    await wait(DOUBLE_TAP_MS + 10);
+    fireEvent.change(pieceInput(), { target: { value: "Reading;" } });
+    expect(pieces()).toEqual(["1h Reading;", "30m Lunch", "30m unlogged"]);
 
     await act(async () => void fireEvent.click(ok()));
     const logs = (await app.store.listLogsForDay(DAY0)).sort((a, b) => a.startMs! - b.startMs!);
@@ -275,23 +311,75 @@ describe("TimerView split bar", () => {
       ["Reading", T0 - 2 * 3_600_000, 3600],
       ["Lunch", T0 - 3_600_000, 1800],
     ]);
-    expect(await app.store.timerStart()).toBe(T0 + 400);
+    expect(await app.store.timerStart()).toBe(Date.now());
     expect(queryButton()).not.toBeNull(); // back to the button
   });
 
-  it("dividers move with the arrow keys, one minute at a time (Shift: 15), never under a minute", async () => {
+  it("a divider drags (its time and both lengths float above it) and, onto a neighbour, merges into that piece", async () => {
+    await renderTimer(T0 - 60 * 60_000);
+    enter();
+    await wait(400);
+    layout(600); // 1 hour: 10 px per minute
+    await doubleTapAt(300);
+    fireEvent.click(document.querySelectorAll<HTMLElement>(".split-piece")[0]!); // keyboard-style pick
+    fireEvent.change(pieceInput(), { target: { value: "Reading" } });
+    fireEvent.click(document.querySelectorAll<HTMLElement>(".split-piece")[1]!);
+    fireEvent.change(pieceInput(), { target: { value: "Lunch" } });
+
+    const handle = () => screen.getByRole("button", { name: /^Divider at/ });
+    await act(async () => void fireEvent.pointerDown(handle(), { pointerId: 2, clientX: 300, button: 0 }));
+    await act(async () => void fireEvent.pointerMove(handle(), { pointerId: 2, clientX: 400 }));
+    expect(pieces()).toEqual(["40m Reading", "20m Lunch"]);
+    expect(document.querySelector(".split-drag-tip")!.textContent).toMatch(/← 40m · 20m →/);
+    await act(async () => void fireEvent.pointerUp(handle(), { pointerId: 2, clientX: 400 }));
+    expect(document.querySelector(".split-drag-tip")).toBeNull();
+
+    // Onto the right edge: the two become one, with the label of the piece dragged into.
+    await act(async () => void fireEvent.pointerDown(handle(), { pointerId: 3, clientX: 400, button: 0 }));
+    await act(async () => void fireEvent.pointerMove(handle(), { pointerId: 3, clientX: 598 }));
+    expect(document.querySelector(".split-drag-tip")!.textContent).toBe("Release to merge");
+    await act(async () => void fireEvent.pointerUp(handle(), { pointerId: 3, clientX: 598 }));
+    expect(pieces()).toEqual(["1h Lunch"]);
+  });
+
+  it("keyboard: / cuts a piece in two, arrows move a divider a minute (Shift: 15), Delete merges", async () => {
     await renderTimer(T0 - 10 * 60_000);
     enter();
     await wait(400);
-    fireEvent.click(screen.getByRole("button", { name: "Split the time" }));
+    fireEvent.keyDown(document.querySelector(".split-piece")!, { key: "/" });
+    expect(pieces()).toEqual(["5m unlogged", "5m unlogged"]);
     const handle = () => screen.getByRole("button", { name: /^Divider at/ });
-    const lens = () => [...document.querySelectorAll(".split-row-len")].map((r) => r.textContent);
-    expect(lens()).toEqual(["5m", "5m"]);
     fireEvent.keyDown(handle(), { key: "ArrowRight" });
-    expect(lens()).toEqual(["6m", "4m"]);
+    expect(pieces()).toEqual(["6m unlogged", "4m unlogged"]);
     fireEvent.keyDown(handle(), { key: "ArrowRight", shiftKey: true });
-    expect(lens()).toEqual(["9m", "1m"]); // stops 1 minute before the end
+    expect(pieces()).toEqual(["9m unlogged", "1m unlogged"]); // stops 1 minute before the end
     fireEvent.keyDown(handle(), { key: "Delete" });
-    expect(lens()).toEqual(["10m"]);
+    expect(pieces()).toEqual(["10m unlogged"]);
+  });
+
+  it("a cut is nudged a minute away from an edge; under 2 minutes nothing can be cut", async () => {
+    await renderTimer(T0 - 10 * 60_000);
+    enter();
+    await wait(400);
+    layout(1000);
+    await doubleTapAt(5); // 3 seconds in: nudged to 1 minute
+    expect(pieces()[0]).toBe("1m unlogged");
+    await doubleTapAt(50); // inside the 1-minute piece: too short to cut
+    expect(pieces()).toHaveLength(2);
+  });
+});
+
+describe("split bar zoom", () => {
+  it("never shows less than 15 minutes, nor more than the span; ticks get finer as it zooms in", () => {
+    const span = { start: 0, end: 86_400_000 };
+    expect(clampView({ start: 1000, end: 2000 }, span)).toEqual({ start: 1000, end: 1000 + MIN_VIEW_MS });
+    expect(clampView({ start: -5, end: 99_999_999 }, span)).toEqual(span);
+    expect(clampView({ start: 0, end: 60_000 }, { start: 0, end: 120_000 })).toEqual({ start: 0, end: 120_000 });
+    const d = new Date(2026, 10, 7).getTime();
+    const day = tickTimes({ start: d, end: d + 86_400_000 }, 600);
+    const quarter = tickTimes({ start: d, end: d + MIN_VIEW_MS }, 600);
+    expect(day[1]! - day[0]!).toBe(3 * 3_600_000);
+    expect(quarter[1]! - quarter[0]!).toBe(2 * 60_000);
+    expect(tickTimes({ start: d, end: d + MIN_VIEW_MS }, 1200)[1]! - quarter[0]!).toBe(60_000);
   });
 });

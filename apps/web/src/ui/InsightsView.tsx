@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
 import { formatPercent, formatSeconds } from "@pm/shared";
 import {
   deviationPoints,
@@ -15,6 +15,7 @@ import {
   type Span,
   type Window,
 } from "../core/insights.ts";
+import { useActivityHue } from "./colors.ts";
 import { ChevronLeft, ChevronRight } from "./icons.tsx";
 import { useLive } from "./services.tsx";
 import { attachTimeGestures } from "./time-gestures.ts";
@@ -47,6 +48,7 @@ const EMPTY = { focus: [] as InsightPoint[], deviation: [] as InsightPoint[] };
 export function InsightsView() {
   const [view, setView] = useState<Window>(() => spanWindow("week", Date.now(), 0));
   const [hover, setHover] = useState<string | null>(null);
+  const hue = useActivityHue();
 
   const { from, to } = fetchRange(view);
   const data =
@@ -153,6 +155,7 @@ export function InsightsView() {
           title="Deviation"
           note="per log · 0% = your top priority"
           points={data.deviation}
+          hueOf={(p) => hue(p.title)}
           view={view}
           setView={setView}
           hover={hover}
@@ -165,7 +168,7 @@ export function InsightsView() {
 
       <div className="insight-detail" aria-live="polite">
         {active ? (
-          <PointDetail p={active} />
+          <PointDetail p={active} hue={active.key.startsWith("f:") ? null : hue(active.title)} />
         ) : (
           (hours.length > 0 || logs.length > 0) && <span className="hint">Hover or tap a point for details.</span>
         )}
@@ -194,7 +197,10 @@ export function InsightsView() {
               {logs.map((p) => (
                 <tr key={p.key}>
                   <td>{when(p.t)}</td>
-                  <td>{p.title}</td>
+                  <td>
+                    <Swatch hue={hue(p.title)} />
+                    {p.title}
+                  </td>
                   <td>{formatSeconds(p.seconds)}</td>
                   <td>{formatPercent(p.value)}</td>
                 </tr>
@@ -263,10 +269,15 @@ function Stat({ label, value }: { label: string; value: number | null }) {
   );
 }
 
-function PointDetail({ p }: { p: InsightPoint }) {
+const Swatch = ({ hue }: { hue: number }) => (
+  <span className="swatch" style={{ "--hue": hue } as CSSProperties} aria-hidden="true" />
+);
+
+function PointDetail({ p, hue }: { p: InsightPoint; hue: number | null }) {
   const isFocus = p.key.startsWith("f:");
   return (
     <div className="point-detail">
+      {hue !== null && <Swatch hue={hue} />}
       <strong>{isFocus ? `${dayOf(p.t)}, ${p.title}` : when(p.t)}</strong>
       <span className="muted"> · {formatSeconds(p.seconds)} logged</span>
       <div className="point-title">{isFocus ? p.detail : p.title}</div>
@@ -306,10 +317,12 @@ interface ChartProps {
   setView: (w: Window) => void;
   hover: string | null;
   onHover: (key: string | null) => void;
+  /** Colour each dot by its activity (a hue); none: the series colour. */
+  hueOf?: (p: InsightPoint) => number;
 }
 
 /** One series, y fixed at 0–100%, x = time, zoomable / pannable. */
-function Chart({ title, note, points, view, setView, hover, onHover }: ChartProps) {
+function Chart({ title, note, points, view, setView, hover, onHover, hueOf }: ChartProps) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
   const plotW = Math.max(10, width - PAD.left - PAD.right);
@@ -324,7 +337,7 @@ function Chart({ title, note, points, view, setView, hover, onHover }: ChartProp
   const lo = firstIn === -1 ? scored.length - 1 : Math.max(0, firstIn - 1);
   let hi = scored.findIndex((m) => m.p.t >= view.end);
   hi = hi === -1 ? scored.length : hi + 1;
-  const marks = scored.slice(Math.max(0, lo), hi).map((m) => ({ key: m.p.key, v: m.v, t: m.p.t, cx: x(m.p.t), cy: y(m.v) }));
+  const marks = scored.slice(Math.max(0, lo), hi).map((m) => ({ key: m.p.key, v: m.v, t: m.p.t, cx: x(m.p.t), cy: y(m.v), hue: hueOf?.(m.p) }));
   const inView = marks.filter((m) => m.t >= view.start && m.t < view.end);
   const path = marks.map((m, k) => `${k === 0 ? "M" : "L"}${m.cx.toFixed(1)},${m.cy.toFixed(1)}`).join("");
   const ticks = timeTicks(view, Math.floor(plotW / TICK_SPACING));
@@ -392,7 +405,14 @@ function Chart({ title, note, points, view, setView, hover, onHover }: ChartProp
           {hovered && <line className="crosshair" x1={hovered.cx} x2={hovered.cx} y1={PAD.top} y2={PAD.top + plotH} />}
           {marks.length > 1 && <path className="series-line" d={path} />}
           {inView.map((m) => (
-            <circle key={m.key} className="series-dot" cx={m.cx} cy={m.cy} r={m.key === hover ? 5.5 : 4} />
+            <circle
+              key={m.key}
+              className={`series-dot ${m.hue !== undefined ? "activity" : ""}`}
+              style={m.hue !== undefined ? ({ "--hue": m.hue } as CSSProperties) : undefined}
+              cx={m.cx}
+              cy={m.cy}
+              r={m.key === hover ? 5.5 : 4}
+            />
           ))}
         </g>
         {hovered && (

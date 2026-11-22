@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
-import { DAY_SECONDS, formatSeconds, todayLocal, type Day } from "@pm/shared";
+import { useMemo, useState, type CSSProperties } from "react";
+import { DAY_SECONDS, dayBounds, formatSeconds, todayLocal, type Day, type LogEntry } from "@pm/shared";
+import { knownSpan } from "../core/timeline.ts";
 import { formatMonth, monthGrid, shiftMonth, totalsByDay } from "../core/views.ts";
 import { DataTools } from "./DataTools.tsx";
+import { useActivityHue } from "./colors.ts";
 import { DaySheet } from "./DaySheet.tsx";
 import { ChevronLeft, ChevronRight } from "./icons.tsx";
 import { useLive } from "./services.tsx";
@@ -49,7 +51,10 @@ function Calendar({ year, month, today, onPick }: { year: number; month: number;
   const weeks = useMemo(() => monthGrid(year, month), [year, month]);
   const first = weeks[0]![0]!.day;
   const last = weeks.at(-1)!.at(-1)!.day;
-  const totals = useLive(async (s) => totalsByDay(await s.store.listLogsBetween(first, last)), [first, last]);
+  const logs = useLive((s) => s.store.listLogsBetween(first, last), [first, last]);
+  const totals = useMemo(() => totalsByDay(logs ?? []), [logs]);
+  const strips = useMemo(() => dayStrips(logs ?? []), [logs]);
+  const hue = useActivityHue();
 
   return (
     <div className="calendar" role="grid" aria-label={formatMonth(year, month)}>
@@ -59,7 +64,7 @@ function Calendar({ year, month, today, onPick }: { year: number; month: number;
         </div>
       ))}
       {weeks.flat().map((c) => {
-        const total = totals?.get(c.day) ?? 0;
+        const total = totals.get(c.day) ?? 0;
         const pct = Math.min(100, (total / DAY_SECONDS) * 100);
         return (
           <button
@@ -72,11 +77,35 @@ function Calendar({ year, month, today, onPick }: { year: number; month: number;
             <span className="dnum">{c.dayOfMonth}</span>
             {total > 0 && <span className="dtotal">{formatSeconds(total)}</span>}
             <span className="dbar" aria-hidden>
-              <span style={{ width: `${pct}%` }} />
+              {strips.get(c.day)?.map((p, k) => (
+                <span
+                  key={k}
+                  className="dbar-piece"
+                  style={{ left: `${p.left}%`, width: `${p.width}%`, "--hue": hue(p.title) } as CSSProperties}
+                />
+              )) ?? (pct > 0 && <span className="dbar-fill" style={{ width: `${pct}%` }} />)}
             </span>
           </button>
         );
       })}
     </div>
   );
+}
+
+/** Each day's logs on its 24 hours, as % positions, for the coloured strip of a calendar cell. */
+function dayStrips(entries: readonly LogEntry[]): Map<Day, { left: number; width: number; title: string }[]> {
+  const out = new Map<Day, { left: number; width: number; title: string }[]>();
+  for (const e of entries) {
+    const span = knownSpan(e);
+    if (!span) continue;
+    const b = dayBounds(e.day);
+    const w = b.end - b.start;
+    const lo = Math.max(span.start, b.start);
+    const hi = Math.min(span.end, b.end);
+    if (hi <= lo) continue;
+    const list = out.get(e.day) ?? [];
+    list.push({ left: ((lo - b.start) / w) * 100, width: Math.max(0.6, ((hi - lo) / w) * 100), title: e.taskTitle });
+    out.set(e.day, list);
+  }
+  return out;
 }

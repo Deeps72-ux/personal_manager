@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { formatPercent, formatSeconds, hasTextAfterSeparator, LIMITS, ONE_ACTIVITY_ERROR, sumSeconds, type Day } from "@pm/shared";
 import { logSlices } from "../core/insights.ts";
-import { carveByClock, daySegments, openIndexAt, piecesToLog, splitMiddle, type Segment } from "../core/split.ts";
+import { daySegments, openIndexAt, piecesToLog, TIMER_LABEL, type Segment } from "../core/split.ts";
 import { dayLayout, knownSpan } from "../core/timeline.ts";
 import { chipText, formatDayLong, pad2, pickOrder } from "../core/views.ts";
+import { cardLook, useActivityHue } from "./colors.ts";
 import { ChevronLeft, XIcon } from "./icons.tsx";
 import { useLive, useServices } from "./services.tsx";
-import { PieceRange, SplitBar } from "./SplitBar.tsx";
-import { cardLook } from "./TaskCard.tsx";
+import { SplitBar } from "./SplitBar.tsx";
 
 const clock = (t: number) => {
   const d = new Date(t);
@@ -18,13 +18,14 @@ const clock = (t: number) => {
  * One day of the LOG.
  *
  * Its 24 hours are a SPLIT BAR: time already logged and the running TIMER
- * are locked; free time is open. Pick a free piece, set its exact From / To
- * (or cut it with ✂ and drag the dividers), type or tap its activity, and
- * save: each labeled piece becomes a manual log exactly there.
+ * are locked (faded, in their activity's colour); free time is open and
+ * unlogged (red). Double-tap to cut, drag the dividers, tap a piece and type
+ * (or tap a task) its activity right in the bar, and save: each labeled
+ * piece becomes a manual log exactly there.
  *
- * Under it, every log is shown slice by slice: a slice per confirmed
- * priority order in force while it ran, with that order's #1 task and the
- * slice's own deviation.
+ * Under it, every log is shown slice by slice, with its colour: a slice per
+ * confirmed priority order in force while it ran, with that order's #1 task
+ * and the slice's own deviation.
  */
 export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
   const { logs } = useServices();
@@ -33,6 +34,8 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
   const history = useLive((s) => s.store.listHistory(), []);
   const tasks = useLive(async (s) => pickOrder(await s.store.listTasks(), await s.store.listPlacements()), []);
   const purgedBefore = useLive((s) => s.store.purgedBefore(), []);
+  const hue = useActivityHue();
+  const input = useRef<HTMLInputElement>(null);
 
   const layout = useMemo(() => dayLayout(day, entries ?? [], timerStart ?? null), [day, entries, timerStart]);
   // The bar starts again whenever what is taken changes (a save, a sync).
@@ -73,8 +76,9 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
     setError(null);
   };
 
-  const save = async () => {
-    if (!bar || saving) return;
+  const save = async (e?: FormEvent) => {
+    e?.preventDefault();
+    if (!bar || saving || labeled === 0) return;
     const check = piecesToLog(segs, (tasks ?? []).map((t) => t.title));
     if (!check.ok) {
       update(segs, check.index);
@@ -120,53 +124,47 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
         <p className="notice">Logs before {purgedBefore} were deleted; this day is closed.</p>
       ) : (
         bar && (
-          <div className="day-split">
+          <form className="day-split" onSubmit={(e) => void save(e)}>
             <SplitBar
               label="This day's 24 hours"
               segs={segs}
               selected={sel}
               onSelect={(i) => {
-                update(segs, i);
+                setBar((cur) => (cur ? { ...cur, sel: i } : cur));
                 setError(null);
               }}
-              onChange={(next, i) => update(next, i ?? Math.min(sel, next.length - 1))}
+              onChange={(next, i) => {
+                update(next, i ?? Math.min(sel, next.length - 1));
+                setError(null);
+              }}
+              hueOf={(p) => (p.locked === TIMER_LABEL ? null : hue(p.locked?.split(" / ")[0] ?? p.text))}
+              input={{
+                ref: input,
+                label: (p) => `Activity from ${clock(p.start)} to ${clock(p.end)}`,
+                placeholder: "One activity, or leave empty (unlogged)",
+                maxLength: LIMITS.titleMax + 1,
+                onText: setText,
+              }}
             />
-            {picked ? (
-              <div className="piece-editor">
-                <PieceRange
-                  seg={picked}
-                  canSplit={splitMiddle(segs, sel) !== null}
-                  onSplit={() => {
-                    const next = splitMiddle(segs, sel);
-                    if (next) update(next, sel + 1);
-                  }}
-                  onRange={(from, to) => {
-                    const r = carveByClock(segs, sel, from, to);
-                    if (r) update(r.segs, r.index);
-                  }}
-                />
-                <input
-                  className="piece-input"
-                  aria-label={`Activity from ${clock(picked.start)} to ${clock(picked.end)}`}
-                  placeholder="One activity, or leave empty (unlogged)"
-                  maxLength={LIMITS.titleMax + 1}
-                  value={picked.text}
-                  onChange={(e) => setText(e.target.value)}
-                />
-                {tasks && tasks.length > 0 && (
-                  <div className="palette" aria-label="Your tasks">
-                    {tasks.map((t) => (
-                      <button key={t.id} type="button" className="chip-btn" onClick={() => setText(chipText(t.title))}>
-                        <span className="chip" style={{ "--hue": cardLook(t.id).hue } as CSSProperties}>
-                          {t.title}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : (
+            {!segs.some((p) => p.locked === null) && (
               <p className="dropzone-hint">No free time on this day: remove a log to make room</p>
+            )}
+            {tasks && tasks.length > 0 && (
+              <div className="palette" aria-label="Your tasks">
+                {tasks.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className="chip-btn"
+                    onPointerDown={(e) => e.preventDefault()}
+                    onClick={() => (picked ? setText(chipText(t.title)) : setError("Tap a piece of the bar first"))}
+                  >
+                    <span className="chip" style={{ "--hue": cardLook(t.id).hue } as CSSProperties}>
+                      {t.title}
+                    </span>
+                  </button>
+                ))}
+              </div>
             )}
             {error && (
               <p className="error" role="alert">
@@ -174,11 +172,11 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
               </p>
             )}
             <div className="row">
-              <button className="primary" disabled={labeled === 0 || saving} onClick={() => void save()}>
+              <button type="submit" className="primary" disabled={labeled === 0 || saving}>
                 {labeled > 1 ? `Log ${labeled} pieces` : "Log it"}
               </button>
             </div>
-          </div>
+          </form>
         )
       )}
 
@@ -199,12 +197,14 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
             </button>
           );
           const source = e.source && <span className="entry-source muted"> · {e.source}</span>;
+          const swatch = <span className="swatch" style={{ "--hue": hue(e.taskTitle) } as CSSProperties} aria-hidden="true" />;
           if (slices.length === 0) {
             const stored = e.deviation ?? null;
             return [
               <li key={e.id} className="entry">
                 <span className="entry-secs">{span ? `${clock(span.start)}–${clock(span.end)}` : "no time"}</span>
                 <span className="entry-title">
+                  {swatch}
                   {e.taskTitle}
                   {source}
                   {stored !== null && <span className="entry-meta muted">deviation {formatPercent(stored)}</span>}
@@ -220,6 +220,7 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
                 {clock(sl.start)}–{clock(sl.end)}
               </span>
               <span className="entry-title">
+                {swatch}
                 {e.taskTitle}
                 {source}
                 <span className="entry-meta muted">

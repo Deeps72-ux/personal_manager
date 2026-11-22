@@ -1,14 +1,9 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { Task } from "@pm/shared";
 import { formatDayLong } from "../core/views.ts";
+import { cardLook } from "./colors.ts";
 
-/** Stable per-card "personality" from the id: accent hue + slight tilt. */
-export function cardLook(id: string): { hue: number; tilt: number } {
-  let h = 2166136261;
-  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
-  const u = h >>> 0;
-  return { hue: u % 360, tilt: ((u >>> 9) % 25) / 10 - 1.2 }; // -1.2° … +1.2°
-}
+export { cardLook } from "./colors.ts";
 
 export function TaskCard({
   task,

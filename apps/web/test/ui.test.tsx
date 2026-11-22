@@ -4,7 +4,7 @@
  */
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { todayLocal, type Change, type PullResponse } from "@pm/shared";
 import { MemorySessionStore, MemoryStore } from "../src/adapters/memory-store.ts";
 import { LogActions, PriorityActions, TaskActions, TimerActions } from "../src/core/actions.ts";
@@ -16,6 +16,7 @@ import { App } from "../src/ui/App.tsx";
 import { ServicesProvider, type Services } from "../src/ui/services.tsx";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   localStorage.clear();
 });
@@ -143,19 +144,37 @@ describe("PWA UI", () => {
     await user.click(nav().getByRole("button", { name: /Log/ }));
     await user.click(await screen.findByRole("gridcell", { name: new RegExp(`^${day}`) }));
 
+    // The bar is 2400 px wide on screen: 100 px per hour (jsdom has no layout).
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 2400,
+      bottom: 50,
+      width: 2400,
+      height: 50,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
     const rows = () =>
-      [...document.querySelectorAll(".split-row")].map(
-        (r) => `${r.querySelector(".split-row-time")!.textContent} ${r.querySelector(".split-row-label")!.textContent}`,
+      [...document.querySelectorAll<HTMLElement>(".split-piece")].map((b) =>
+        b.getAttribute("aria-label")!.replace(/^(\S+) to (\S+), .*?: (.*)$/, "$1–$2 $3"),
       );
     await waitFor(() => expect(rows()).toEqual(["00:00–00:00 unlogged"]));
-    const range = (from: string, to: string) => {
-      fireEvent.change(screen.getByLabelText("From"), { target: { value: from } });
-      fireEvent.change(screen.getByLabelText("To"), { target: { value: to } });
+    const viewport = () => document.querySelector<HTMLElement>(".splitbar-viewport")!;
+    const doubleTap = (x: number) => {
+      for (let k = 0; k < 2; k++) {
+        fireEvent.pointerDown(viewport(), { pointerId: 1, clientX: x, button: 0, pointerType: "touch" });
+        fireEvent.pointerUp(viewport(), { pointerId: 1, clientX: x, button: 0, pointerType: "touch" });
+      }
     };
-    range("00:00", "08:00");
+    doubleTap(800); // 08:00
+    doubleTap(850); // 08:30
+    await waitFor(() => expect(rows()).toEqual(["00:00–08:00 unlogged", "08:00–08:30 unlogged", "08:30–00:00 unlogged"]));
+    const piece = (i: number) => document.querySelectorAll<HTMLElement>(".split-piece")[i]!;
+    fireEvent.click(piece(0)); // pick (keyboard-style click: at once)
     await user.click(screen.getByRole("button", { name: "Sleep" })); // tap a card to fill the picked piece
-    await user.click(screen.getByRole("button", { name: /^08:00–00:00/ }));
-    range("08:00", "08:30");
+    fireEvent.click(piece(1));
     await user.type(screen.getByLabelText("Activity from 08:00 to 08:30"), "Task7");
     expect(rows()).toEqual(["00:00–08:00 Sleep;", "08:00–08:30 Task7", "08:30–00:00 unlogged"]);
     expect(await services.store.listLogsForDay(day)).toEqual([]); // nothing saved yet
@@ -172,14 +191,19 @@ describe("PWA UI", () => {
     expect(text[2]).toContain("priority: Sleep · deviation 33.3%");
     // Logged time is locked on the bar now.
     await waitFor(() => expect(rows()[0]).toBe("00:00–08:30 Sleep / Task7"));
-    expect(screen.getByRole("button", { name: /^00:00–08:30/ })).toHaveProperty("disabled", true);
+    expect(piece(0).getAttribute("aria-disabled")).toBe("true");
+    // Coloured: each entry has its activity's swatch.
+    expect(document.querySelectorAll(".entries .swatch").length).toBe(3);
 
     await user.click(screen.getByRole("button", { name: "Delete Task7 entry" }));
     await waitFor(() => expect(entries().queryByText("08:00–08:30")).toBeNull());
 
     // back to the calendar: today shows its total
     await user.click(screen.getByRole("button", { name: "Back to calendar" }));
-    expect(await screen.findByRole("gridcell", { name: `${day}, 8h logged` })).toBeTruthy();
+    const cell = await screen.findByRole("gridcell", { name: `${day}, 8h logged` });
+    // Its strip shows the day's logs in their colours, on the clock.
+    const strip = [...cell.querySelectorAll<HTMLElement>(".dbar-piece")].map((p) => [p.style.left, p.style.width]);
+    expect(strip).toEqual([["0%", `${(8 / 24) * 100}%`]]);
   });
 
   it("PRIORITY: ✓ is pressable only when the order differs from the confirmed one", async () => {
