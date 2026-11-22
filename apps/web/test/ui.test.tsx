@@ -183,17 +183,19 @@ describe("PWA UI", () => {
     const entries = () => within(document.querySelector(".entries") as HTMLElement);
     // Sleep ran under two confirmed orders: one slice each, with that order's #1 and its own score.
     await waitFor(() => expect(entries().getByText("00:00–04:00")).toBeTruthy());
-    const text = [...document.querySelectorAll(".entries .entry")].map((li) => li.textContent);
-    expect(text[0]).toContain("priority: Task7 · deviation 33.3%");
-    expect(text[1]).toContain("04:00–08:00");
-    expect(text[1]).toContain("priority: Sleep · deviation 0%");
-    expect(text[2]).toContain("08:00–08:30");
-    expect(text[2]).toContain("priority: Sleep · deviation 33.3%");
+    // One entry per log; under Sleep, each confirmed order in force while it ran, with its own score.
+    const text = [...document.querySelectorAll(".entries > .entry")].map((li) => li.textContent);
+    expect(text).toHaveLength(2);
+    expect(text[0]).toContain("00:00–08:00Sleep");
+    const sleepSlices = [...document.querySelectorAll(".entry-slices li")].map((li) => li.textContent);
+    expect(sleepSlices).toEqual(["00:00–04:00 priority: Task7 · deviation 33.3%", "04:00–08:00 priority: Sleep · deviation 0%"]);
+    expect(text[1]).toContain("08:00–08:30");
+    expect(text[1]).toContain("priority: Sleep · deviation 33.3%");
     // Logged time is locked on the bar now.
     await waitFor(() => expect(rows()[0]).toBe("00:00–08:30 Sleep / Task7"));
     expect(piece(0).getAttribute("aria-disabled")).toBe("true");
     // Coloured: each entry has its activity's swatch.
-    expect(document.querySelectorAll(".entries .swatch").length).toBe(3);
+    expect(document.querySelectorAll(".entries .swatch").length).toBe(2);
 
     await user.click(screen.getByRole("button", { name: "Delete Task7 entry" }));
     await waitFor(() => expect(entries().queryByText("08:00–08:30")).toBeNull());

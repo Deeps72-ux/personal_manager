@@ -249,6 +249,26 @@ describe("LogActions", () => {
     expect(await app.logs.addPieces(day, singleSegment(at(14), at(15), "a; b"))).toMatchObject({ ok: false });
   });
 
+  it("a log touching one of the same activity (under a second apart) merges with it: one log, however it was entered", async () => {
+    const app = setup();
+    const day = "2026-11-05";
+    await app.timer.restart(at(9));
+    await app.timer.logAndRestart("Sleep;", at(10) - 300); // a timer log ends on a whole second
+    await app.timer.restart(at(0, 0, 6)); // the running timer holds the next day, not this one
+    expect(await app.logs.add(day, 3600, "sleep", at(10))).toMatchObject({ ok: true });
+    expect(await app.logs.add(day, 1800, "Reading", at(11))).toMatchObject({ ok: true }); // another activity: kept apart
+    expect(await app.logs.add(day, 1800, "Sleep", at(11, 30))).toMatchObject({ ok: true }); // touches Reading, not Sleep
+    const logs = (await app.store.listLogsForDay(day)).sort((a, b) => a.startMs! - b.startMs!);
+    expect(logs.map((l) => [l.taskTitle, l.startMs, l.seconds])).toEqual([
+      ["Sleep", at(9), 7200],
+      ["Reading", at(11), 1800],
+      ["Sleep", at(11, 30), 1800],
+    ]);
+    // The merge travels as changes: the old logs deleted, one created.
+    const ops = (await app.store.listOutbox()).map((c) => c.op);
+    expect(ops.filter((o) => o === "deleteLog")).toHaveLength(1);
+  });
+
   it("rejects bad input without writing", async () => {
     const app = setup();
     expect(await app.logs.add("2026-11-05", "abc", "x", at(1))).toMatchObject({ ok: false });

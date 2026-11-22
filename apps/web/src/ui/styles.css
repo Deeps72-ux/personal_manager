@@ -1559,6 +1559,8 @@ textarea {
   font-weight: 650;
 }
 .piece-input.inline {
+  /* taps go through to the bar: double-tap cuts here too, a tap focuses it */
+  pointer-events: none;
   top: 3px;
   bottom: 3px;
   padding: 0 0.5rem;
@@ -1598,4 +1600,16 @@ textarea {
 .entry-meta {
   display: block;
   font-size: 0.8rem;
+}
+.entry-slices {
+  list-style: none;
+  margin: 0.2rem 0 0;
+  padding: 0 0 0 0.6rem;
+  border-left: 2px solid var(--border);
+  display: grid;
+  gap: 0.1rem;
+}
+.entry-slice-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
 }

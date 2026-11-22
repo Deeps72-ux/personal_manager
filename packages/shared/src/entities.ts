@@ -95,8 +95,7 @@ export type TaskPatch = z.infer<typeof TaskPatchSchema>;
  *
  * `confirmed`: true when the user pressed the confirm icon (the visible list
  * only, never the queue). Missing/null = a LEGACY snapshot that older
- * versions took on every change; those only count before the first
- * confirmed snapshot (see `scoringHistory`).
+ * versions took on every change; those never count (see `scoringHistory`).
  */
 export const PrioritySnapshotSchema = z.strictObject({
   id: IdSchema,

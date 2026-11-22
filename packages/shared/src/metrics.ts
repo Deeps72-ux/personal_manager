@@ -105,16 +105,13 @@ export interface PriorityAt {
 }
 
 /**
- * The snapshots scores are taken against, sorted by time. Once a CONFIRMED
- * snapshot exists, only confirmed ones count from the first of them on;
- * legacy ones (taken automatically by older versions, possibly still sent by
- * a device that was not updated yet) only cover the time before it.
+ * The snapshots scores are taken against, sorted by time: the CONFIRMED ones
+ * only. Snapshots taken automatically by older versions (on every drag, never
+ * confirmed; possibly still sent by a device not updated yet) never count:
+ * time before the first confirm is not scored.
  */
 export function scoringHistory<T extends PriorityAt>(history: readonly T[]): T[] {
-  const sorted = [...history].sort((a, b) => a.at - b.at);
-  const first = sorted.find((s) => s.confirmed === true);
-  if (!first) return sorted;
-  return sorted.filter((s) => (s.confirmed === true ? true : s.at < first.at));
+  return history.filter((s) => s.confirmed === true).sort((a, b) => a.at - b.at);
 }
 
 /** The latest confirmed snapshot, if any. */

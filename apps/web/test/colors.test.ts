@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { cardLook, hueFor, safeHue, wordsHue } from "../src/ui/colors.ts";
-import { cutAt, mergeCut, singleSegment } from "../src/core/split.ts";
+import { cutAt, daySegments, mergeCut, openIndexAt, singleSegment } from "../src/core/split.ts";
+import { dayLayout } from "../src/core/timeline.ts";
 
 const isRed = (h: number) => h < 25 || h >= 335;
 
@@ -40,5 +41,32 @@ describe("split: cut and merge", () => {
     expect(mergeCut(segs, 0, "right")).toEqual([{ start: 0, end: 10 * M, locked: null, text: "B" }]);
     expect(mergeCut(segs, 0, "left")![0]!.text).toBe("A");
     expect(mergeCut([segs[0]!, { ...segs[1]!, text: "" }], 0, "right")![0]!.text).toBe("A");
+  });
+});
+
+describe("split: a LOG day", () => {
+  it("slivers of free time under a minute between logs are not pieces; nothing is picked unless free now", () => {
+    const day = "2026-11-22";
+    const t = (h: number, m: number, s = 0, ms = 0) => new Date(2026, 10, 22, h, m, s, ms).getTime();
+    const log = (id: string, title: string, start: number, seconds: number) => ({
+      id,
+      day,
+      taskTitle: title,
+      seconds,
+      startMs: start,
+      focus: null,
+      deviation: null,
+      source: "timer" as const,
+    });
+    const entries = [
+      log("a", "Sleep", t(2, 2, 29), (t(9, 49, 32) - t(2, 2, 29)) / 1000),
+      log("b", "Problem of the day", t(9, 49, 32, 211), 8127), // 211 ms after Sleep
+      log("c", "Codeforces", t(12, 5), 3600), // 789 ms after the one before
+    ];
+    const segs = daySegments(day, dayLayout(day, entries, null));
+    expect(segs.every((s) => s.locked !== null || s.end - s.start >= 60_000)).toBe(true);
+    expect(segs.filter((s) => s.locked !== null).map((s) => s.locked)).toEqual(["Sleep / Problem of the day / Codeforces"]);
+    expect(openIndexAt(segs, t(10, 0))).toBe(-1);
+    expect(openIndexAt(segs, t(20, 0))).toBe(segs.length - 1);
   });
 });

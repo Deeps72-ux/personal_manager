@@ -74,7 +74,7 @@ describe("deviation from the priority history", () => {
     ]);
   });
 
-  it("legacy snapshots only count before the first confirmed one; later legacy ones (old devices) are ignored", () => {
+  it("only confirmed snapshots count: old automatic ones (every drag, never confirmed) are ignored", () => {
     const history = [
       { at: 0, titles: ["Old"] },
       { at: 10, titles: ["Older device"] },
@@ -82,14 +82,13 @@ describe("deviation from the priority history", () => {
       { at: 30, titles: ["Sneaky"] }, // a not-yet-updated device kept snapshotting
       { at: 40, titles: ["B", "A"], confirmed: true },
     ];
-    expect(scoringHistory(history).map((h) => h.at)).toEqual([0, 10, 20, 40]);
+    expect(scoringHistory(history).map((h) => h.at)).toEqual([20, 40]);
     expect(deviationSlices("A", 5, 50, history).map((s) => [s.start, s.end, s.top])).toEqual([
-      [5, 10, "Old"],
-      [10, 20, "Older device"],
+      [5, 20, null], // before the first confirm: not scored
       [20, 40, "A"],
       [40, 50, "B"],
     ]);
-    expect(scoringHistory([{ at: 0, titles: ["x"] }])).toHaveLength(1); // nothing confirmed yet: legacy counts
+    expect(scoringHistory([{ at: 0, titles: ["x"] }])).toEqual([]); // nothing confirmed yet: nothing scored
   });
 
   it("focus per hour: 100 / (1 + switches)", () => {

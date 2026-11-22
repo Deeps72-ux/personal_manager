@@ -25,8 +25,8 @@ async function renderWith(starts: number[], swap = Infinity) {
         source: "timer",
       });
     }
-    await tx.putSnapshot({ id: uuidv7(0), at: 0, titles: ["A", "B"] });
-    if (swap !== Infinity) await tx.putSnapshot({ id: uuidv7(swap), at: swap, titles: ["B", "A"] });
+    await tx.putSnapshot({ id: uuidv7(0), at: 0, titles: ["A", "B"], confirmed: true });
+    if (swap !== Infinity) await tx.putSnapshot({ id: uuidv7(swap), at: swap, titles: ["B", "A"], confirmed: true });
   });
   render(
     <ServicesProvider value={{ store } as unknown as Services}>

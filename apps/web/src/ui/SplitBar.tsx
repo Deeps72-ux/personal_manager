@@ -138,6 +138,11 @@ export function SplitBar({
 
   useEffect(() => () => void (g.current.timer && clearTimeout(g.current.timer)), []);
 
+  // A piece was picked: its text box takes the keyboard.
+  useEffect(() => {
+    if (selected >= 0) input.ref.current?.focus();
+  }, [selected, input.ref]);
+
   const timeAt = (clientX: number, v: TimeWindow = live.current.view): number | null => {
     const r = viewport.current?.getBoundingClientRect();
     if (!r || r.width === 0) return null;
@@ -199,13 +204,16 @@ export function SplitBar({
       st.timer = null;
       const { segs: now, onSelect: pick } = live.current;
       const i = pieceAt(now, t);
-      if (i !== -1 && now[i]!.locked === null) pick(i);
+      if (i !== -1 && now[i]!.locked === null) {
+        pick(i);
+        input.ref.current?.focus(); // also when it was already picked
+      }
     }, DOUBLE_TAP_MS);
   };
 
   const onDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
-    if ((e.target as Element).closest?.(".piece-input")) return; // typing, not a gesture
+    if ((e.target as Element).closest?.(".piece-input.floating")) return; // typing, not a gesture
     e.preventDefault(); // keep the text box (and the phone keyboard) focused
     const st = g.current;
     st.pointers.set(e.pointerId, e.clientX);

@@ -72,7 +72,33 @@ export function daySegments(day: Day, layout: Pick<DayLayout, "pieces" | "timer"
     const end = Math.min(m.end, bounds.end);
     if (end > start) out.push({ start, end, locked: m.labels.join(" / ") || "Taken", text: "" });
   }
-  return out.sort((a, b) => a.start - b.start);
+  out.sort((a, b) => a.start - b.start);
+  // Slivers of free time under a minute between logs (a timer log ends on a
+  // whole second, the next starts on the millisecond) cannot be picked:
+  // they join the locked time next to them.
+  const kept: Segment[] = [];
+  for (let i = 0; i < out.length; i++) {
+    const s = out[i]!;
+    const prev = kept.at(-1);
+    const next = out[i + 1];
+    if (s.locked === null && s.end - s.start < MIN_PIECE_MS) {
+      if (prev && prev.locked !== null) {
+        prev.end = s.end;
+        continue;
+      }
+      if (next && next.locked !== null) {
+        next.start = s.start;
+        continue;
+      }
+    }
+    if (prev && prev.locked !== null && s.locked !== null && prev.end === s.start) {
+      prev.end = s.end;
+      if (!prev.locked.split(" / ").includes(s.locked)) prev.locked = `${prev.locked} / ${s.locked}`;
+      continue;
+    }
+    kept.push({ ...s });
+  }
+  return kept;
 }
 
 /** Cut open piece `i` at `at` (snapped to a whole minute). The new right part is unlogged. Null if it cannot be cut there. */
@@ -157,8 +183,6 @@ export function piecesToLog(segs: readonly Segment[], knownTitles: readonly stri
   return { ok: true, pieces: out };
 }
 
-/** The open piece containing `t`, else the first open piece, else -1. */
-export function openIndexAt(segs: readonly Segment[], t: number): number {
-  const at = segs.findIndex((s) => s.locked === null && s.start <= t && t < s.end);
-  return at !== -1 ? at : segs.findIndex((s) => s.locked === null);
-}
+/** The open piece containing `t`, else -1 (nothing picked: tap a piece). */
+export const openIndexAt = (segs: readonly Segment[], t: number): number =>
+  segs.findIndex((s) => s.locked === null && s.start <= t && t < s.end);

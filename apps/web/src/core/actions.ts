@@ -8,6 +8,7 @@
 import {
   DaySchema,
   LIMITS,
+  activityKey,
   TaskSchema,
   dayBounds,
   formatSeconds,
@@ -38,6 +39,51 @@ async function record(tx: LocalTx, c: NewChange): Promise<Change> {
   await tx.enqueue(change);
   await applyChangeLocally(tx, change);
   return change;
+}
+
+/** Two logs at most this far apart (end → start) touch. Timer logs end on a whole second. */
+const ADJACENT_MS = 1000;
+
+/**
+ * Write `entry`, merged with every log of the same activity on its day that
+ * touches it (end to start, at most a second apart): those are deleted and one
+ * log covering them all is created. Returns what was written.
+ */
+async function createLogMerged(tx: LocalTx, entry: LogEntry): Promise<LogEntry> {
+  if (entry.startMs == null) {
+    await record(tx, { op: "createLog", entry });
+    return entry;
+  }
+  const key = activityKey(entry.taskTitle);
+  const same = (await tx.listLogsForDay(entry.day)).filter(
+    (l) => l.id !== entry.id && l.startMs != null && activityKey(l.taskTitle) === key,
+  );
+  let start = entry.startMs;
+  let end = entry.startMs + entry.seconds * 1000;
+  const absorbed: LogEntry[] = [];
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const l of same) {
+      if (absorbed.includes(l)) continue;
+      const ls = l.startMs!;
+      const le = ls + l.seconds * 1000;
+      if (le < start - ADJACENT_MS || ls > end + ADJACENT_MS) continue;
+      if (le > start + ADJACENT_MS && ls < end - ADJACENT_MS) continue; // overlapping: not ours to touch
+      absorbed.push(l);
+      start = Math.min(start, ls);
+      end = Math.max(end, le);
+      grew = true;
+    }
+  }
+  if (absorbed.length === 0) {
+    await record(tx, { op: "createLog", entry });
+    return entry;
+  }
+  for (const l of absorbed) await record(tx, { op: "deleteLog", logId: l.id });
+  const first = [entry, ...absorbed].sort((a, b) => a.startMs! - b.startMs!)[0]!;
+  const merged: LogEntry = { ...entry, taskTitle: first.taskTitle, startMs: start, seconds: Math.floor((end - start) / 1000) };
+  await record(tx, { op: "createLog", entry: merged });
+  return merged;
 }
 
 interface Deps {
@@ -201,7 +247,7 @@ export class PriorityActions {
    * Upgrade from the versions that snapshotted every change: when there is
    * legacy history but nothing confirmed yet, confirm today's visible list
    * once, so a confirmed snapshot is always in force from here on. Legacy
-   * snapshots keep scoring the time before it. A new user (no history)
+   * snapshots never score (time before it is unscored). A new user (no history)
    * starts unscored until their first confirm. Call after a sync.
    */
   async ensureConfirmedStart(now = Date.now()): Promise<void> {
@@ -288,8 +334,7 @@ export class LogActions {
         startMs: p.startMs,
         source: "manual",
       };
-      await record(tx, { op: "createLog", entry });
-      entries.push(entry);
+      entries.push(await createLogMerged(tx, entry));
     }
     return { ok: true, entries };
   }
@@ -398,8 +443,7 @@ export class TimerActions {
           startMs: p.startMs,
           source: "timer",
         };
-        await record(tx, { op: "createLog", entry });
-        entries.push(entry);
+        entries.push(await createLogMerged(tx, entry));
       }
       await record(tx, { op: "setTimerStart", startMs: now });
       return { ok: true, entries };

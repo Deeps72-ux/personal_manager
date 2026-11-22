@@ -190,7 +190,7 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
           const del = (
             <button
               className="icon"
-              aria-label={`Delete ${e.taskTitle} entry${slices.length > 1 ? ` (all ${slices.length} slices)` : ""}`}
+              aria-label={`Delete ${e.taskTitle} entry`}
               onClick={() => void logs.remove(e.id)}
             >
               <XIcon />
@@ -214,24 +214,40 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
               </li>,
             ];
           }
-          return slices.map((sl, k) => (
-            <li key={`${e.id}:${k}`} className="entry">
+          // ONE entry per log; under it, each priority order in force while it ran.
+          const whole = span ?? { start: slices[0]!.start, end: slices.at(-1)!.end };
+          return [
+            <li key={e.id} className="entry">
               <span className="entry-secs">
-                {clock(sl.start)}–{clock(sl.end)}
+                {clock(whole.start)}–{clock(whole.end)}
               </span>
               <span className="entry-title">
                 {swatch}
                 {e.taskTitle}
                 {source}
-                <span className="entry-meta muted">
-                  priority: {sl.top ?? "none confirmed"}
-                  {sl.deviation !== null && <> · deviation {formatPercent(sl.deviation)}</>}
-                </span>
+                {slices.length === 1 ? (
+                  <span className="entry-meta muted">
+                    priority: {slices[0]!.top ?? "none confirmed"}
+                    {slices[0]!.deviation !== null && <> · deviation {formatPercent(slices[0]!.deviation)}</>}
+                  </span>
+                ) : (
+                  <ul className="entry-slices" aria-label={`${e.taskTitle}: priority by time`}>
+                    {slices.map((sl, k) => (
+                      <li key={k} className="entry-meta muted">
+                        <span className="entry-slice-time">
+                          {clock(sl.start)}–{clock(sl.end)}
+                        </span>{" "}
+                        priority: {sl.top ?? "none confirmed"}
+                        {sl.deviation !== null && <> · deviation {formatPercent(sl.deviation)}</>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </span>
-              <span className="entry-fmt muted">{formatSeconds(Math.round((sl.end - sl.start) / 1000))}</span>
+              <span className="entry-fmt muted">{formatSeconds(e.seconds)}</span>
               {del}
-            </li>
-          ));
+            </li>,
+          ];
         })}
       </ul>
     </section>

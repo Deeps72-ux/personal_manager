@@ -32,7 +32,7 @@ describe("Excel export", () => {
         startMs: start,
         source: "timer",
       });
-      await tx.putSnapshot({ id: uuidv7(0), at: 0, titles: ["A", "B", "C"] });
+      await tx.putSnapshot({ id: uuidv7(0), at: 0, titles: ["A", "B", "C"], confirmed: true });
     });
     let saved: { blob: Blob; name: string } | null = null;
     const exporter = new ExportLogs({
