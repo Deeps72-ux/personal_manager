@@ -24,13 +24,36 @@ export const RankSchema = z.string().refine(isValidRank, "must be a fractional-i
 const Title = z.string().trim().min(1, "title is required").max(LIMITS.titleMax);
 const Description = z.string().max(LIMITS.descriptionMax).nullable();
 
+/**
+ * `folderId` / `folderRank`: where the task sits in the TASKS tab (a folder,
+ * null = top level) and its manual order there. They only shape the TASKS
+ * tab: every other screen ignores them. Missing/null rank = a task from an
+ * older version, ordered by its priority rank until it is moved.
+ */
 export const TaskSchema = z.strictObject({
   id: IdSchema,
   title: Title,
   description: Description,
   dueDate: DaySchema.nullable(),
+  folderId: IdSchema.nullish(),
+  folderRank: RankSchema.nullish(),
 });
 export type Task = z.infer<typeof TaskSchema>;
+
+/**
+ * A FOLDER in the TASKS tab. Folders nest (`parentId`, null = top level) and
+ * have a manual order among their siblings (`rank`). They group tasks for
+ * browsing only: they never change how tasks behave anywhere else.
+ * A folder whose parent no longer exists (deleted on another device) shows
+ * at the top level.
+ */
+export const FolderSchema = z.strictObject({
+  id: IdSchema,
+  name: Title,
+  parentId: IdSchema.nullable(),
+  rank: RankSchema,
+});
+export type Folder = z.infer<typeof FolderSchema>;
 
 const EpochMs = z.int().min(0).max(2 ** 48 - 1);
 

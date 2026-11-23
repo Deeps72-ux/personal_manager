@@ -89,3 +89,31 @@ export const ChartIcon = () => (
     <path d="M7 15l4-4 3 3 5-6" />
   </svg>
 );
+
+export const FolderIcon = () => (
+  <svg {...props}>
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+  </svg>
+);
+
+export const FolderPlusIcon = () => (
+  <svg {...props} width={18} height={18}>
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    <path d="M12 11v6M9 14h6" />
+  </svg>
+);
+
+/** "Move to…": an arrow going into a folder. */
+export const MoveIcon = () => (
+  <svg {...props} width={18} height={18}>
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    <path d="M9 14h6M12.5 11.5L15 14l-2.5 2.5" />
+  </svg>
+);
+
+export const PencilIcon = () => (
+  <svg {...props} width={18} height={18}>
+    <path d="M4 20h4L19 9l-4-4L4 16z" />
+    <path d="M13.5 6.5l4 4" />
+  </svg>
+);

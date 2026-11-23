@@ -1613,3 +1613,193 @@ textarea {
   font-variant-numeric: tabular-nums;
   font-weight: 650;
 }
+
+/* ───────────── TASKS: folders ───────────── */
+.folder-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1.4rem 0 0.7rem;
+}
+.new-folder {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+.crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.crumb-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.crumb {
+  background: none;
+  padding: 0.25rem 0.4rem;
+  color: var(--primary);
+  font-weight: 600;
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.crumb:hover {
+  background: var(--primary-soft);
+}
+.crumb-sep,
+.crumb-more {
+  color: var(--muted);
+}
+.crumb-current {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.05rem;
+  padding-left: 0.25rem;
+  overflow-wrap: anywhere;
+}
+.folderlist {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.folderrow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0.3rem 0.3rem 0.3rem 0.4rem;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+.folder-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: none;
+  text-align: left;
+  padding: 0.45rem 0.5rem;
+  font-weight: 600;
+}
+.folder-open svg {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+.folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-confirm {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  padding: 0.2rem 0.4rem;
+}
+.name-form {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0.2rem 0.3rem;
+}
+.name-form svg {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+.name-form input {
+  flex: 1;
+  min-width: 6rem;
+  padding: 0.4rem 0.6rem;
+}
+.folderrow.dragging {
+  box-shadow: var(--shadow-lift);
+  cursor: grabbing;
+}
+
+/* drag and drop: long-press on touch, so a swipe still scrolls */
+.drag-item {
+  position: relative;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.drag-item.placeholder {
+  opacity: 0.35;
+}
+.drag-item.drop-into,
+.crumb.drop-into {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  background: var(--primary-soft);
+}
+.drag-item.drop-before::before,
+.drag-item.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--primary);
+  z-index: 2;
+}
+.drag-item.drop-before::before {
+  top: -5px;
+}
+.drag-item.drop-after::after {
+  bottom: -5px;
+}
+.cardlist .drag-item.drop-before::before {
+  top: -6px;
+}
+.cardlist .drag-item.drop-after::after {
+  bottom: -6px;
+}
+
+/* Move to… */
+.move-list {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+.move-target {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: left;
+  background: none;
+  padding: 0.55rem 0.8rem;
+  overflow-wrap: anywhere;
+}
+.move-target:not(:disabled):hover {
+  background: var(--primary-soft);
+}
+.move-target svg {
+  width: 18px;
+  height: 18px;
+  color: var(--primary);
+  flex-shrink: 0;
+}

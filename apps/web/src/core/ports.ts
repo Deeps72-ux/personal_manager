@@ -7,6 +7,7 @@ import type {
   Change,
   Credentials,
   Day,
+  Folder,
   LogEntry,
   Placement,
   PrioritySnapshot,
@@ -30,6 +31,11 @@ export interface LocalTx {
   deletePlacement(taskId: string): Promise<void>;
   listPlacements(): Promise<Placement[]>;
 
+  getFolder(id: string): Promise<Folder | undefined>;
+  putFolder(folder: Folder): Promise<void>;
+  deleteFolder(id: string): Promise<void>;
+  listFolders(): Promise<Folder[]>;
+
   putLog(entry: LogEntry): Promise<void>;
   deleteLog(id: string): Promise<void>;
   deleteLogsBefore(day: Day): Promise<void>;
@@ -46,7 +52,7 @@ export interface LocalTx {
   setCursor(cursor: number): Promise<void>;
   getPurgedBefore(): Promise<Day | null>;
   setPurgedBefore(day: Day | null): Promise<void>;
-  /** Remove all synced rows (tasks, placements, logs, history). Outbox is kept. */
+  /** Remove all synced rows (tasks, placements, folders, logs, history). Outbox is kept. */
   clearSynced(): Promise<void>;
 
   /**
@@ -65,6 +71,7 @@ export interface LocalStore {
 
   listTasks(): Promise<Task[]>;
   listPlacements(): Promise<Placement[]>;
+  listFolders(): Promise<Folder[]>;
   listLogsForDay(day: Day): Promise<LogEntry[]>;
   /** Inclusive range, sorted by day. */
   listLogsBetween(from: Day, to: Day): Promise<LogEntry[]>;

@@ -2,12 +2,13 @@
  * In-memory LocalStore + SessionStore. Used by tests, and a living proof of
  * Liskov substitution: the same contract tests pass for this and for Dexie.
  */
-import type { Change, Day, LogEntry, Placement, PrioritySnapshot, Task } from "@pm/shared";
+import type { Change, Day, Folder, LogEntry, Placement, PrioritySnapshot, Task } from "@pm/shared";
 import type { LocalStore, LocalTx, Session, SessionStore } from "../core/ports.ts";
 
 interface Data {
   tasks: Map<string, Task>;
   placements: Map<string, Placement>;
+  folders: Map<string, Folder>;
   logs: Map<string, LogEntry>;
   history: Map<string, PrioritySnapshot>;
   outbox: Change[];
@@ -20,6 +21,7 @@ interface Data {
 const empty = (): Data => ({
   tasks: new Map(),
   placements: new Map(),
+  folders: new Map(),
   logs: new Map(),
   history: new Map(),
   outbox: [],
@@ -32,6 +34,7 @@ const empty = (): Data => ({
 const clone = (d: Data): Data => ({
   tasks: new Map(d.tasks),
   placements: new Map(d.placements),
+  folders: new Map(d.folders),
   logs: new Map(d.logs),
   history: new Map(d.history),
   outbox: [...d.outbox],
@@ -67,6 +70,9 @@ export class MemoryStore implements LocalStore {
   }
   async listPlacements() {
     return [...this.data.placements.values()];
+  }
+  async listFolders() {
+    return [...this.data.folders.values()];
   }
   async listLogsForDay(day: Day) {
     return [...this.data.logs.values()].filter((l) => l.day === day).sort(byDayThenId);
@@ -117,6 +123,10 @@ function txFor(d: Data): LocalTx {
     putPlacement: async (p) => void d.placements.set(p.taskId, p),
     deletePlacement: async (id) => void d.placements.delete(id),
     listPlacements: async () => [...d.placements.values()],
+    getFolder: async (id) => d.folders.get(id),
+    putFolder: async (f) => void d.folders.set(f.id, f),
+    deleteFolder: async (id) => void d.folders.delete(id),
+    listFolders: async () => [...d.folders.values()],
     putLog: async (l) => void d.logs.set(l.id, l),
     deleteLog: async (id) => void d.logs.delete(id),
     deleteLogsBefore: async (day) => {
@@ -139,6 +149,7 @@ function txFor(d: Data): LocalTx {
     clearSynced: async () => {
       d.tasks.clear();
       d.placements.clear();
+      d.folders.clear();
       d.logs.clear();
       d.history.clear();
     },

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MemoryStore } from "../src/adapters/memory-store.ts";
-import { LogActions, PriorityActions, TaskActions, TimerActions } from "../src/core/actions.ts";
+import { FolderActions, LogActions, PriorityActions, TaskActions, TimerActions } from "../src/core/actions.ts";
 import { ValidationError } from "../src/core/errors.ts";
 import { singleSegment, splitAt, type Segment } from "../src/core/split.ts";
 import { priorityOrder, splitPriority } from "../src/core/views.ts";
@@ -15,6 +15,7 @@ function setup() {
   return {
     store,
     tasks: new TaskActions({ store, sync }),
+    folders: new FolderActions({ store, sync }),
     priority: new PriorityActions({ store, sync }),
     logs: new LogActions({ store, sync }),
     timer: new TimerActions({ store, sync }),

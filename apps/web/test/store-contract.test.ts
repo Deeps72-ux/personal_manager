@@ -48,6 +48,29 @@ describe.each(impls)("%s", (_name, makeStore, makeSessions) => {
     expect(await s.listLogsBetween("2026-11-06", "2026-11-06")).toEqual([l2]);
   });
 
+  it("folders: write, read back, delete; clearSynced and wipe remove them", async () => {
+    const s = makeStore();
+    const f = { id: uuidv7(), name: "Work", parentId: null, rank: "a0" };
+    const g = { id: uuidv7(), name: "Home", parentId: f.id, rank: "a1" };
+    await s.write(async (tx) => {
+      await tx.putFolder(f);
+      await tx.putFolder(g);
+      await tx.putFolder({ ...g, name: "House" });
+    });
+    const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : 1);
+    expect((await s.listFolders()).sort(byId)).toEqual([f, { ...g, name: "House" }].sort(byId));
+    await s.write(async (tx) => {
+      expect(await tx.getFolder(f.id)).toEqual(f);
+      await tx.deleteFolder(f.id);
+    });
+    expect((await s.listFolders()).map((x) => x.id)).toEqual([g.id]);
+    await s.write((tx) => tx.clearSynced());
+    expect(await s.listFolders()).toEqual([]);
+    await s.write((tx) => tx.putFolder(f));
+    await s.wipe();
+    expect(await s.listFolders()).toEqual([]);
+  });
+
   it("a failed write changes nothing (atomic)", async () => {
     const s = makeStore();
     await expect(

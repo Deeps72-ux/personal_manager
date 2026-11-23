@@ -40,8 +40,9 @@ export class PullChanges {
             placements: await repos.placements.listAll(userId),
             logEntries: await repos.logs.listAll(userId),
             priorityHistory: await repos.priorityHistory.listAll(userId),
+            folders: await repos.folders.listAll(userId),
           },
-          deletes: { tasks: [], placements: [], logEntries: [] },
+          deletes: { tasks: [], placements: [], logEntries: [], folders: [] },
         };
       }
 
@@ -80,11 +81,13 @@ async function materialize(repos: Repositories, userId: string, page: readonly C
       placements: await repos.placements.getMany(userId, ids("placements", "upsert")),
       logEntries: await repos.logs.getMany(userId, ids("log_entries", "upsert")),
       priorityHistory: await repos.priorityHistory.getMany(userId, ids("priority_history", "upsert")),
+      folders: await repos.folders.getMany(userId, ids("folders", "upsert")),
     },
     deletes: {
       tasks: ids("tasks", "delete"),
       placements: ids("placements", "delete"),
       logEntries: ids("log_entries", "delete"),
+      folders: ids("folders", "delete"),
     },
   };
 }

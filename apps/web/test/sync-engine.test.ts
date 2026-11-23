@@ -9,7 +9,7 @@ import { startServer, type RunningServer } from "@pm/test-server";
 import { HttpRemoteApi } from "../src/adapters/http-api.ts";
 import { MemorySessionStore, MemoryStore } from "../src/adapters/memory-store.ts";
 import { SseChannel } from "../src/adapters/sse-channel.ts";
-import { LogActions, PriorityActions, TaskActions, TimerActions } from "../src/core/actions.ts";
+import { FolderActions, LogActions, PriorityActions, TaskActions, TimerActions } from "../src/core/actions.ts";
 import { AuthService, SessionHolder } from "../src/core/auth.ts";
 import { SyncEngine } from "../src/core/sync-engine.ts";
 import { priorityOrder } from "../src/core/views.ts";
@@ -46,6 +46,7 @@ function device(name: string, opts: { baseUrl?: string; realtime?: boolean } = {
     auth,
     holder,
     tasks: new TaskActions({ store, sync }),
+    folders: new FolderActions({ store, sync }),
     priority: new PriorityActions({ store, sync }),
     logs: new LogActions({ store, sync }),
     timer: new TimerActions({ store, sync }),

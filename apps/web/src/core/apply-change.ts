@@ -55,6 +55,30 @@ export async function applyChangeLocally(tx: LocalTx, change: Change): Promise<v
       await tx.setTimerStart(current === null ? change.startMs : Math.max(current, change.startMs));
       return;
     }
+    case "createFolder":
+      await tx.putFolder(change.folder);
+      return;
+    case "renameFolder": {
+      const f = await tx.getFolder(change.folderId);
+      if (f) await tx.putFolder({ ...f, name: change.name });
+      return;
+    }
+    case "moveFolder": {
+      const f = await tx.getFolder(change.folderId);
+      // Same refusal as the server: never put a folder inside itself.
+      if (f && !(change.parentId !== null && (await isSelfOrAncestor(tx, f.id, change.parentId)))) {
+        await tx.putFolder({ ...f, parentId: change.parentId, rank: change.rank });
+      }
+      return;
+    }
+    case "deleteFolder":
+      await tx.deleteFolder(change.folderId);
+      return;
+    case "setTaskFolder": {
+      const task = await tx.getTask(change.taskId);
+      if (task) await tx.putTask({ ...task, folderId: change.folderId, folderRank: change.folderRank });
+      return;
+    }
     case "purgeLogsBefore": {
       const purged = await tx.getPurgedBefore();
       const guard = purged && purged > change.before ? purged : change.before;
@@ -63,6 +87,16 @@ export async function applyChangeLocally(tx: LocalTx, change: Change): Promise<v
       return;
     }
   }
+}
+
+async function isSelfOrAncestor(tx: LocalTx, folderId: string, target: string): Promise<boolean> {
+  const seen = new Set<string>();
+  for (let id: string | null = target; id !== null && !seen.has(id); ) {
+    if (id === folderId) return true;
+    seen.add(id);
+    id = (await tx.getFolder(id))?.parentId ?? null;
+  }
+  return false;
 }
 
 /** Field-level patch: only fields present in the patch change. */

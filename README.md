@@ -4,7 +4,7 @@ A personal app with five sections, synced across a MacBook Air M1, a Windows 11 
 
 | Section | What it does |
 |---|---|
-| **TASKS** | Add or remove task cards: title, optional description, optional due date |
+| **TASKS** | Add or remove task cards: title, optional description, optional due date. Sort them into **folders** (nested, any depth): ＋ New folder, ✎ rename (names are unique among siblings), ✕ remove (also deletes everything inside, after a confirm that counts it). Tap a folder to open it; new tasks go into the open folder, at the bottom. Drag a card or folder onto a folder to move it in, onto a name in the path to move it out, or between items to reorder (long-press on touch); or use **Move to…**. The open folder is remembered per device. Folders only shape this tab: every other section lists tasks exactly as before |
 | **PRIORITY** | All cards in one stack. Drag and drop sets the order; new cards go on top; the order syncs. Top right: the **waiting queue**. Drag a card onto it to park it (it leaves the list). Tapping it shows a pipeline, newest on top and oldest at the bottom. Each task goes from blue to red over an hour, then pulses faster; the icon glows by the oldest task. Dragging the bottom task out puts it back at the top of the priority list (#1). Next to it, the **confirm ✓** icon: reordering, adding, deleting, queuing and un-queuing only change what you see. Scores use the last confirmed order until you press ✓, which snapshots the visible list (never the queue) at that moment. It can only be pressed when the order has changed |
 | **LOG** | Calendar → a day. Its 24 hours are a **split bar**: time already logged and the running timer are locked. Double-tap to cut (whole minutes), drag a divider to move it or onto a neighbour to merge, pinch / Ctrl+scroll to zoom (down to 15 min), tap a piece and type (or tap a task) its activity right in the bar, and save. Each piece has its activity's colour; unlogged time is red; logged time is faded. Each log is listed slice by slice, with its colour: one slice per confirmed priority order in force while it ran, with that order's #1 task and the slice's own deviation |
 | **TIMER** | One timer shared by every device. Opening it shows the time since the last restart as a **split bar**, typed into straight away: one piece = **one** activity (`Activity;`; the `;` is added if missing, and nothing may follow it). Double-tap the bar to cut it into pieces of any size (whole minutes, at least 1 minute each), the same as a LOG day: give each piece its own activity or leave it unlogged; same-activity neighbours become one log. ✓ logs them. ✕ restarts without logging |
@@ -23,7 +23,7 @@ It also exports logs to Excel for a date range and deletes logs older than a cho
    IndexedDB (local copy) + outbox + cursor  ──push/pull──┐
                                                           ▼
  Mac M1: Node server (Hono)  ← reached via Tailscale HTTPS (MagicDNS)
-   SQLite: users, tasks, placements, log_entries, change_log (server only)
+   SQLite: users, tasks, placements, folders, log_entries, priority_history, change_log (server only)
 ```
 
 - **Offline-first:** the UI only reads and writes the local DB; a SyncEngine pushes the outbox and pulls `change_log` entries after the device's cursor.

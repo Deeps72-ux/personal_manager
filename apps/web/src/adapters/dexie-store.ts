@@ -3,7 +3,7 @@
  * it survives app restarts and works with no network at all.
  */
 import { Dexie, type Table } from "dexie";
-import type { Change, Day, LogEntry, Placement, PrioritySnapshot, Task } from "@pm/shared";
+import type { Change, Day, Folder, LogEntry, Placement, PrioritySnapshot, Task } from "@pm/shared";
 import type { LocalStore, LocalTx, Session, SessionStore } from "../core/ports.ts";
 
 interface OutboxRow {
@@ -19,6 +19,7 @@ interface MetaRow {
 class Db extends Dexie {
   tasks!: Table<Task, string>;
   placements!: Table<Placement, string>;
+  folders!: Table<Folder, string>;
   logs!: Table<LogEntry, string>;
   history!: Table<PrioritySnapshot, string>;
   outbox!: Table<OutboxRow, number>;
@@ -34,10 +35,11 @@ class Db extends Dexie {
       meta: "key",
     });
     this.version(2).stores({ history: "id, at" });
+    this.version(3).stores({ folders: "id" });
   }
 }
 
-const SYNCED = ["tasks", "placements", "logs", "history"] as const;
+const SYNCED = ["tasks", "placements", "folders", "logs", "history"] as const;
 const TIMER_KEY = "timerStartedAt";
 const TIMER_PROVISIONAL_KEY = "timerProvisional";
 const byAtThenId = (a: PrioritySnapshot, b: PrioritySnapshot) => a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -56,7 +58,7 @@ export class DexieStore implements LocalStore, SessionStore {
 
   async write<T>(fn: (tx: LocalTx) => Promise<T>): Promise<T> {
     const db = this.db;
-    const result = await db.transaction("rw", [db.tasks, db.placements, db.logs, db.history, db.outbox, db.meta], async () =>
+    const result = await db.transaction("rw", [db.tasks, db.placements, db.folders, db.logs, db.history, db.outbox, db.meta], async () =>
       fn(this.tx()),
     );
     this.emit();
@@ -74,6 +76,10 @@ export class DexieStore implements LocalStore, SessionStore {
       putPlacement: async (p) => void (await db.placements.put(p)),
       deletePlacement: (id) => db.placements.delete(id),
       listPlacements: () => db.placements.toArray(),
+      getFolder: (id) => db.folders.get(id),
+      putFolder: async (f) => void (await db.folders.put(f)),
+      deleteFolder: (id) => db.folders.delete(id),
+      listFolders: () => db.folders.toArray(),
       putLog: async (l) => void (await db.logs.put(l)),
       deleteLog: (id) => db.logs.delete(id),
       deleteLogsBefore: async (day) => void (await db.logs.where("day").below(day).delete()),
@@ -104,6 +110,9 @@ export class DexieStore implements LocalStore, SessionStore {
   listPlacements() {
     return this.db.placements.toArray();
   }
+  listFolders() {
+    return this.db.folders.toArray();
+  }
   listLogsForDay(day: Day) {
     return this.db.logs.where("day").equals(day).sortBy("id");
   }
@@ -133,10 +142,11 @@ export class DexieStore implements LocalStore, SessionStore {
   }
   async wipe() {
     const db = this.db;
-    await db.transaction("rw", [db.tasks, db.placements, db.logs, db.history, db.outbox, db.meta], async () => {
+    await db.transaction("rw", [db.tasks, db.placements, db.folders, db.logs, db.history, db.outbox, db.meta], async () => {
       await Promise.all([
         db.tasks.clear(),
         db.placements.clear(),
+        db.folders.clear(),
         db.logs.clear(),
         db.history.clear(),
         db.outbox.clear(),

@@ -7,7 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { todayLocal, type Change, type PullResponse } from "@pm/shared";
 import { MemorySessionStore, MemoryStore } from "../src/adapters/memory-store.ts";
-import { LogActions, PriorityActions, TaskActions, TimerActions } from "../src/core/actions.ts";
+import { FolderActions, LogActions, PriorityActions, TaskActions, TimerActions } from "../src/core/actions.ts";
 import { AuthService, SessionHolder } from "../src/core/auth.ts";
 import { ExportLogs } from "../src/core/export-logs.ts";
 import type { RemoteApi } from "../src/core/ports.ts";
@@ -31,8 +31,8 @@ function fakeApi(): RemoteApi & { pushed: Change[] } {
     hasMore: false,
     purgedBefore: null,
     timerStart: null,
-    upserts: { tasks: [], placements: [], logEntries: [], priorityHistory: [] },
-    deletes: { tasks: [], placements: [], logEntries: [] },
+    upserts: { tasks: [], placements: [], logEntries: [], priorityHistory: [], folders: [] },
+    deletes: { tasks: [], placements: [], logEntries: [], folders: [] },
   };
   return {
     pushed,
@@ -59,6 +59,7 @@ function renderApp() {
     sync,
     auth: new AuthService({ api, sessions: new MemorySessionStore(), store, holder }),
     tasks: new TaskActions({ store, sync }),
+    folders: new FolderActions({ store, sync }),
     priority: new PriorityActions({ store, sync }),
     logs: new LogActions({ store, sync }),
     timer: new TimerActions({ store, sync }),
@@ -126,6 +127,88 @@ describe("PWA UI", () => {
         "deleteTask",
       ]),
     );
+  });
+
+  it("TASKS folders: create, open, add inside, path back, Move to…, rename, remove with everything in it", async () => {
+    const { user, api } = renderApp();
+    await signUp(user);
+    await user.click(nav().getByRole("button", { name: /Tasks/ }));
+
+    await user.click(screen.getByRole("button", { name: /New folder/ }));
+    await user.type(screen.getByLabelText("New folder name"), "Work{Enter}");
+    await user.click(await screen.findByRole("button", { name: "Open Work, 0 tasks" }));
+    expect(screen.getByText("No tasks or folders yet.")).toBeTruthy();
+
+    await user.type(screen.getByLabelText("Title"), "inside");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await screen.findByText("inside");
+    await user.click(screen.getByRole("button", { name: /New folder/ }));
+    await user.type(screen.getByLabelText("New folder name"), "Deep{Enter}");
+    await screen.findByRole("button", { name: "Open Deep, 0 tasks" });
+
+    // The path leads back to the top level; the folder count includes its sub-folders.
+    const path = within(screen.getByRole("navigation", { name: "Folder path" }));
+    await user.click(path.getByRole("button", { name: "Tasks" }));
+    await screen.findByRole("button", { name: "Open Work, 1 task" });
+    expect(screen.queryByText("inside")).toBeNull();
+
+    // A duplicate name next to it is refused.
+    await user.click(screen.getByRole("button", { name: /New folder/ }));
+    await user.type(screen.getByLabelText("New folder name"), "work{Enter}");
+    expect((await screen.findByRole("alert")).textContent).toContain("already a folder");
+    await user.keyboard("{Escape}");
+
+    // Move to…: a top-level task into Work › Deep.
+    await user.type(screen.getByLabelText("Title"), "loose");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await user.click(await screen.findByRole("button", { name: "Move loose" }));
+    const dialog = within(screen.getByRole("dialog", { name: "Move loose" }));
+    expect((dialog.getByRole("button", { name: /Tasks/ }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(dialog.getByRole("button", { name: "Deep" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await screen.findByRole("button", { name: "Open Work, 2 tasks" });
+
+    await user.click(screen.getByRole("button", { name: "Rename Work" }));
+    const field = screen.getByLabelText("Rename Work");
+    await user.clear(field);
+    await user.type(field, "Job{Enter}");
+    await screen.findByRole("button", { name: "Open Job, 2 tasks" });
+
+    // Remove asks first and says what goes with it.
+    await user.click(screen.getByRole("button", { name: "Remove Job" }));
+    expect(screen.getByText("Deletes 2 folders and 2 tasks")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    await screen.findByText("No tasks yet. Add your first one above.");
+
+    // Other tabs never saw folders: the priority list is simply empty again.
+    await user.click(nav().getByRole("button", { name: /Priority/ }));
+    expect(document.querySelectorAll(".stack-item").length).toBe(0);
+    await waitFor(() =>
+      expect(api.pushed.map((c) => c.op).filter((op) => op !== "recordPriority")).toEqual([
+        "createFolder",
+        "createTask",
+        "createFolder",
+        "createTask",
+        "setTaskFolder",
+        "renameFolder",
+        "deleteTask",
+        "deleteTask",
+        "deleteFolder",
+        "deleteFolder",
+      ]),
+    );
+  });
+
+  it("TASKS remembers the open folder on this device", async () => {
+    const { user } = renderApp();
+    await signUp(user);
+    await user.click(nav().getByRole("button", { name: /Tasks/ }));
+    await user.click(screen.getByRole("button", { name: /New folder/ }));
+    await user.type(screen.getByLabelText("New folder name"), "Work{Enter}");
+    await user.click(await screen.findByRole("button", { name: "Open Work, 0 tasks" }));
+    await user.click(nav().getByRole("button", { name: /Priority/ }));
+    await user.click(nav().getByRole("button", { name: /Tasks/ }));
+    expect(await screen.findByText("New task in Work")).toBeTruthy();
   });
 
   it("LOG: the day's 24 hours as a split bar: pick exact ranges, label them, save; each log shows its priority slices", async () => {

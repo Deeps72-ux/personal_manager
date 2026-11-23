@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Repositories } from "../../ports/repositories.ts";
 import type { UnitOfWork } from "../../ports/unit-of-work.ts";
 import { SqliteChangeLogRepository } from "./change-log-repository.ts";
+import { SqliteFolderRepository } from "./folder-repository.ts";
 import { SqliteLogRepository } from "./log-repository.ts";
 import { SqlitePriorityHistoryRepository } from "./priority-history-repository.ts";
 import { SqliteSessionRepository } from "./session-repository.ts";
@@ -28,6 +29,7 @@ export class SqliteUnitOfWork implements UnitOfWork {
       placements: new SqlitePlacementRepository(db),
       logs: new SqliteLogRepository(db),
       priorityHistory: new SqlitePriorityHistoryRepository(db),
+      folders: new SqliteFolderRepository(db),
       changeLog: new SqliteChangeLogRepository(db),
     };
   }

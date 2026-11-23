@@ -6,7 +6,7 @@
  * ISOLATION RULE: every method that reads or writes user data takes `userId`
  * as its first argument. There is no way to call a repository "for all users".
  */
-import type { Day, LogEntry, Placement, PrioritySnapshot, Task, TaskPatch } from "@pm/shared";
+import type { Day, Folder, LogEntry, Placement, PrioritySnapshot, Task, TaskPatch } from "@pm/shared";
 
 export interface UserRecord {
   id: string;
@@ -48,6 +48,18 @@ export interface TaskRepository {
   listAll(userId: string): Promise<Task[]>;
   insert(userId: string, task: Task): Promise<void>;
   update(userId: string, id: string, patch: TaskPatch): Promise<void>;
+  /** Where the task sits in the TASKS tab (null = top level) and its order there. */
+  setFolder(userId: string, id: string, folderId: string | null, folderRank: string): Promise<void>;
+  delete(userId: string, id: string): Promise<void>;
+}
+
+export interface FolderRepository {
+  get(userId: string, id: string): Promise<Folder | null>;
+  getMany(userId: string, ids: readonly string[]): Promise<Folder[]>;
+  listAll(userId: string): Promise<Folder[]>;
+  insert(userId: string, folder: Folder): Promise<void>;
+  rename(userId: string, id: string, name: string): Promise<void>;
+  move(userId: string, id: string, parentId: string | null, rank: string): Promise<void>;
   delete(userId: string, id: string): Promise<void>;
 }
 
@@ -81,7 +93,7 @@ export interface PriorityHistoryRepository {
 }
 
 /** "timer" rows only bump the cursor (row id = user id); the value travels in every pull. */
-export type SyncedTable = "tasks" | "placements" | "log_entries" | "priority_history" | "timer";
+export type SyncedTable = "tasks" | "placements" | "log_entries" | "priority_history" | "timer" | "folders";
 export type ChangeOpKind = "upsert" | "delete";
 
 export interface ChangeLogEntry {
@@ -113,5 +125,6 @@ export interface Repositories {
   placements: PlacementRepository;
   logs: LogRepository;
   priorityHistory: PriorityHistoryRepository;
+  folders: FolderRepository;
   changeLog: ChangeLogRepository;
 }

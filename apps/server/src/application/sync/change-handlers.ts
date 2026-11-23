@@ -41,6 +41,25 @@ async function missingTask(repos: Repositories, userId: string, taskId: string):
   return ignored((await repos.changeLog.wasDeleted(userId, "tasks", taskId)) ? "deleted" : "notFound");
 }
 
+async function missingFolder(repos: Repositories, userId: string, folderId: string): Promise<ApplyResult> {
+  return ignored((await repos.changeLog.wasDeleted(userId, "folders", folderId)) ? "deleted" : "notFound");
+}
+
+/**
+ * True if `folderId` is `target` or one of its ancestors: moving it into
+ * `target` would put a folder inside itself. Stops on a missing parent or a
+ * loop (neither can come from this server, but never spin forever).
+ */
+async function isSelfOrAncestor(repos: Repositories, userId: string, folderId: string, target: string): Promise<boolean> {
+  const seen = new Set<string>();
+  for (let id: string | null = target; id !== null && !seen.has(id); ) {
+    if (id === folderId) return true;
+    seen.add(id);
+    id = (await repos.folders.get(userId, id))?.parentId ?? null;
+  }
+  return false;
+}
+
 /** `entry` cut down to what is left of it outside `cut`: one piece per remaining span (under 1 s dropped). */
 function pieces(entry: LogEntry, cut: readonly Interval[], nowMs: number): LogEntry[] {
   const left = subtractIntervals(logSpan(entry.startMs!, entry.seconds), cut);
@@ -166,6 +185,50 @@ export const changeHandlers: ChangeHandlers = {
     await repos.users.raiseTimerStart(userId, startMs);
     // Only bumps the cursor so other devices pull; the value rides on every pull.
     await repos.changeLog.append(userId, "timer", userId, "upsert", nowMs);
+    return applied;
+  },
+
+  async createFolder(repos, { userId, nowMs }, { folder }) {
+    if (await repos.folders.get(userId, folder.id)) return applied; // resend
+    if (await repos.changeLog.wasDeleted(userId, "folders", folder.id)) return ignored("deleted");
+    await repos.folders.insert(userId, folder);
+    await repos.changeLog.append(userId, "folders", folder.id, "upsert", nowMs);
+    return applied;
+  },
+
+  async renameFolder(repos, { userId, nowMs }, { folderId, name }) {
+    if (!(await repos.folders.get(userId, folderId))) return missingFolder(repos, userId, folderId);
+    await repos.folders.rename(userId, folderId, name);
+    await repos.changeLog.append(userId, "folders", folderId, "upsert", nowMs);
+    return applied;
+  },
+
+  async moveFolder(repos, { userId, nowMs }, { folderId, parentId, rank }) {
+    if (!(await repos.folders.get(userId, folderId))) return missingFolder(repos, userId, folderId);
+    // Two devices apart may each move one folder into the other: the later
+    // one is refused, and the folder is sent again so that device undoes it.
+    if (parentId !== null && (await isSelfOrAncestor(repos, userId, folderId, parentId))) {
+      await repos.changeLog.append(userId, "folders", folderId, "upsert", nowMs);
+      return ignored("invalid");
+    }
+    await repos.folders.move(userId, folderId, parentId, rank);
+    await repos.changeLog.append(userId, "folders", folderId, "upsert", nowMs);
+    return applied;
+  },
+
+  async deleteFolder(repos, { userId, nowMs }, { folderId }) {
+    if (!(await repos.folders.get(userId, folderId))) return ignored("notFound");
+    // Only this folder: the device sends the deletes of what was inside it.
+    // Anything added inside it meanwhile on another device shows at the top level.
+    await repos.folders.delete(userId, folderId);
+    await repos.changeLog.append(userId, "folders", folderId, "delete", nowMs);
+    return applied;
+  },
+
+  async setTaskFolder(repos, { userId, nowMs }, { taskId, folderId, folderRank }) {
+    if (!(await repos.tasks.get(userId, taskId))) return missingTask(repos, userId, taskId);
+    await repos.tasks.setFolder(userId, taskId, folderId, folderRank);
+    await repos.changeLog.append(userId, "tasks", taskId, "upsert", nowMs);
     return applied;
   },
 

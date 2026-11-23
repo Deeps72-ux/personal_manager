@@ -28,6 +28,7 @@ import {
   type Task,
 } from "@pm/shared";
 import { applyChangeLocally } from "./apply-change.ts";
+import { buildFolderTree, nameKey, type FolderId, type FolderTree } from "./folders.ts";
 import { ValidationError } from "./errors.ts";
 import type { LocalStore, LocalTx, SyncTrigger } from "./ports.ts";
 import { piecesToLog, singleSegment, type LoggedPiece, type Segment } from "./split.ts";
@@ -114,6 +115,8 @@ export interface NewTaskInput {
   title: string;
   description?: string | null;
   dueDate?: string | null;
+  /** TASKS-tab folder to create it in (null or gone = top level). */
+  folderId?: string | null;
 }
 
 export class TaskActions {
@@ -122,7 +125,10 @@ export class TaskActions {
     this.deps = deps;
   }
 
-  /** New tasks always go to the TOP of the priority list. */
+  /**
+   * New tasks always go to the TOP of the priority list, and to the BOTTOM
+   * of their folder in the TASKS tab.
+   */
   async create(input: NewTaskInput): Promise<Task> {
     // ";" ends an activity in a log, so a title cannot contain one.
     if (input.title.includes(";")) throw new ValidationError("A title cannot contain ';'");
@@ -130,11 +136,14 @@ export class TaskActions {
     const dueDate = input.dueDate?.trim() ? input.dueDate.trim() : null;
     const parsed = TaskSchema.safeParse({ id: uuidv7(), title: input.title, description, dueDate });
     if (!parsed.success) throw new ValidationError(taskError(input.title, description, dueDate));
-    const task = parsed.data;
 
-    await this.deps.store.write(async (tx) => {
-      const rank = rankForTop(sortedRanks(await tx.listPlacements()));
-      await record(tx, { op: "createTask", task, rank });
+    const task = await this.deps.store.write(async (tx) => {
+      const placements = await tx.listPlacements();
+      const tree = await treeIn(tx);
+      const folderId = input.folderId && tree.has(input.folderId) ? input.folderId : null;
+      const task: Task = { ...parsed.data, folderId, folderRank: taskRankAt(tree, folderId, null) };
+      await record(tx, { op: "createTask", task, rank: rankForTop(sortedRanks(placements)) });
+      return task;
     });
     this.deps.sync.requestSync();
     return task;
@@ -149,6 +158,134 @@ export class TaskActions {
       await record(tx, { op: "deleteTask", taskId });
     });
     this.deps.sync.requestSync();
+  }
+}
+
+// ───────────── TASKS tab folders ─────────────
+
+async function treeIn(tx: LocalTx): Promise<FolderTree> {
+  return buildFolderTree(await tx.listFolders(), await tx.listTasks(), await tx.listPlacements());
+}
+
+/** Order key that puts a task at `index` of `folderId`'s tasks (`taskId` left out first). Default: the bottom. */
+function taskRankAt(tree: FolderTree, folderId: FolderId, taskId: string | null, index?: number): string {
+  const keys = tree
+    .tasks(folderId)
+    .filter((t) => t.id !== taskId)
+    .map(tree.taskKey);
+  return rankAt(keys, clampIndex(index, keys.length));
+}
+
+/** Rank that puts a folder at `index` of `parentId`'s sub-folders (`folderId` left out first). Default: the bottom. */
+function folderRankAt(tree: FolderTree, parentId: FolderId, folderId: string | null, index?: number): string {
+  const ranks = tree
+    .folders(parentId)
+    .filter((f) => f.id !== folderId)
+    .map((f) => f.rank);
+  return rankAt(ranks, clampIndex(index, ranks.length));
+}
+
+const clampIndex = (index: number | undefined, length: number) =>
+  index === undefined ? length : Math.max(0, Math.min(Math.trunc(index), length));
+
+/** A trimmed, valid folder name not used by another folder in `parentId`, or throws. */
+function checkName(tree: FolderTree, parentId: FolderId, name: string, self: string | null): string {
+  const trimmed = name.trim();
+  if (!trimmed) throw new ValidationError("Folder name is required");
+  if (trimmed.length > LIMITS.titleMax) throw new ValidationError(`Folder name must be at most ${LIMITS.titleMax} characters`);
+  if (tree.folders(parentId).some((f) => f.id !== self && nameKey(f.name) === nameKey(trimmed))) {
+    throw new ValidationError(`There is already a folder called "${trimmed}" here`);
+  }
+  return trimmed;
+}
+
+/**
+ * FOLDERS in the TASKS tab: create, rename, move, remove, and moving tasks
+ * between them. Folders only shape the TASKS tab: moving things never
+ * changes priority, the queue or logs.
+ */
+export class FolderActions {
+  private readonly deps: Deps;
+  constructor(deps: Deps) {
+    this.deps = deps;
+  }
+
+  /** New folder at the BOTTOM of `parentId`'s folders. Names are unique among siblings (ignoring case). */
+  async create(name: string, parentId: FolderId = null): Promise<string> {
+    const id = await this.deps.store.write(async (tx) => {
+      const tree = await treeIn(tx);
+      const parent = parentId && tree.has(parentId) ? parentId : null;
+      const folder = { id: uuidv7(), name: checkName(tree, parent, name, null), parentId: parent, rank: folderRankAt(tree, parent, null) };
+      await record(tx, { op: "createFolder", folder });
+      return folder.id;
+    });
+    this.deps.sync.requestSync();
+    return id;
+  }
+
+  async rename(folderId: string, name: string): Promise<void> {
+    const changed = await this.deps.store.write(async (tx) => {
+      const tree = await treeIn(tx);
+      const folder = tree.get(folderId);
+      if (!folder) return false;
+      const trimmed = checkName(tree, tree.parentOf(folderId), name, folderId);
+      if (trimmed === folder.name) return false;
+      await record(tx, { op: "renameFolder", folderId, name: trimmed });
+      return true;
+    });
+    if (changed) this.deps.sync.requestSync();
+  }
+
+  /**
+   * Hard delete of the folder, its sub-folders and EVERY task inside them
+   * (each task removed exactly like TASKS ✕: it leaves priority and the
+   * queue; past logs are untouched).
+   */
+  async remove(folderId: string): Promise<void> {
+    const removed = await this.deps.store.write(async (tx) => {
+      const tree = await treeIn(tx);
+      if (!tree.has(folderId)) return false;
+      const folders = [tree.get(folderId)!, ...tree.descendants(folderId)];
+      for (const f of folders) for (const t of tree.tasks(f.id)) await record(tx, { op: "deleteTask", taskId: t.id });
+      for (const f of folders.reverse()) await record(tx, { op: "deleteFolder", folderId: f.id });
+      return true;
+    });
+    if (removed) this.deps.sync.requestSync();
+  }
+
+  /**
+   * Move a folder into `parentId` (null = top level) at `index` of its
+   * folders (default: the bottom). Refused into itself or one of its own
+   * sub-folders, or next to a folder with the same name.
+   */
+  async moveFolder(folderId: string, parentId: FolderId, index?: number): Promise<void> {
+    const moved = await this.deps.store.write(async (tx) => {
+      const tree = await treeIn(tx);
+      const folder = tree.get(folderId);
+      if (!folder) return false;
+      const parent = parentId && tree.has(parentId) ? parentId : null;
+      if (tree.contains(folderId, parent)) throw new ValidationError("A folder cannot go inside itself");
+      if (parent !== tree.parentOf(folderId)) checkName(tree, parent, folder.name, folderId);
+      const rank = folderRankAt(tree, parent, folderId, index);
+      if (parent === folder.parentId && rank === folder.rank) return false;
+      await record(tx, { op: "moveFolder", folderId, parentId: parent, rank });
+      return true;
+    });
+    if (moved) this.deps.sync.requestSync();
+  }
+
+  /** Move a task into `folderId` (null = top level) at `index` of its tasks (default: the bottom). */
+  async moveTask(taskId: string, folderId: FolderId, index?: number): Promise<void> {
+    const moved = await this.deps.store.write(async (tx) => {
+      const tree = await treeIn(tx);
+      const task = await tx.getTask(taskId);
+      if (!task) return false;
+      const target = folderId && tree.has(folderId) ? folderId : null;
+      const folderRank = taskRankAt(tree, target, taskId, index);
+      await record(tx, { op: "setTaskFolder", taskId, folderId: target, folderRank });
+      return true;
+    });
+    if (moved) this.deps.sync.requestSync();
   }
 }
 

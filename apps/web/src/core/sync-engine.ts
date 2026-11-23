@@ -235,10 +235,12 @@ export class SyncEngine implements SyncTrigger {
       for (const id of p.deletes.placements) await tx.deletePlacement(id);
       for (const id of p.deletes.tasks) await tx.deleteTask(id);
       for (const id of p.deletes.logEntries) await tx.deleteLog(id);
+      for (const id of p.deletes.folders) await tx.deleteFolder(id);
       for (const t of p.upserts.tasks) await tx.putTask(t);
       for (const pl of p.upserts.placements) await tx.putPlacement(pl);
       for (const l of p.upserts.logEntries) await tx.putLog(l);
       for (const s of p.upserts.priorityHistory) await tx.putSnapshot(s);
+      for (const f of p.upserts.folders) await tx.putFolder(f);
       await tx.setPurgedBefore(p.purgedBefore);
       await tx.setCursor(p.cursor);
       const timerPush = await this.syncTimer(tx, p.timerStart);

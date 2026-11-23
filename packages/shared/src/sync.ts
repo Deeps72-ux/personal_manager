@@ -11,6 +11,7 @@
 import { z } from "zod";
 import {
   DaySchema,
+  FolderSchema,
   IdSchema,
   LogEntrySchema,
   PlacementSchema,
@@ -54,6 +55,21 @@ export const ChangeSchema = z.discriminatedUnion("op", [
   z.strictObject({ ...base, op: z.literal("recordPriority"), snapshot: PrioritySnapshotSchema }),
   /** The one shared TIMER restarted at `startMs`. The latest start wins. */
   z.strictObject({ ...base, op: z.literal("setTimerStart"), startMs: z.int().min(0) }),
+  // ── TASKS tab folders: browsing only, no effect anywhere else ──
+  z.strictObject({ ...base, op: z.literal("createFolder"), folder: FolderSchema }),
+  z.strictObject({ ...base, op: z.literal("renameFolder"), folderId: IdSchema, name: FolderSchema.shape.name }),
+  /** Into `parentId` (null = top level) at `rank`. Refused if it would put a folder inside itself. */
+  z.strictObject({ ...base, op: z.literal("moveFolder"), folderId: IdSchema, parentId: IdSchema.nullable(), rank: RankSchema }),
+  /** Hard delete of ONE folder. The device sends the deletes of its tasks and sub-folders too. */
+  z.strictObject({ ...base, op: z.literal("deleteFolder"), folderId: IdSchema }),
+  /** Put a task in a folder (null = top level) at `folderRank` in the TASKS tab. */
+  z.strictObject({
+    ...base,
+    op: z.literal("setTaskFolder"),
+    taskId: IdSchema,
+    folderId: IdSchema.nullable(),
+    folderRank: RankSchema,
+  }),
 ]);
 export type Change = z.infer<typeof ChangeSchema>;
 export type ChangeOp = Change["op"];
@@ -71,8 +87,10 @@ export type PushRequest = z.infer<typeof PushRequestSchema>;
  *   - "deleted":   target task was deleted elsewhere (delete wins over edit/move)
  *   - "purged":    log day is before the purge date (purge guard)
  *   - "notFound":  nothing to delete/update (already gone)
+ *   - "invalid":   would break a rule only the server can see (a folder moved
+ *                  inside itself); the server re-sends the row as it is
  */
-export const IgnoredReasonSchema = z.enum(["deleted", "purged", "notFound"]);
+export const IgnoredReasonSchema = z.enum(["deleted", "purged", "notFound", "invalid"]);
 export type IgnoredReason = z.infer<typeof IgnoredReasonSchema>;
 
 export const ChangeResultSchema = z.discriminatedUnion("status", [
@@ -109,11 +127,13 @@ export const PullResponseSchema = z.strictObject({
     placements: z.array(PlacementSchema),
     logEntries: z.array(LogEntrySchema),
     priorityHistory: z.array(PrioritySnapshotSchema),
+    folders: z.array(FolderSchema),
   }),
   deletes: z.strictObject({
     tasks: z.array(IdSchema),
     placements: z.array(IdSchema), // by taskId
     logEntries: z.array(IdSchema),
+    folders: z.array(IdSchema),
   }),
 });
 export type PullResponse = z.infer<typeof PullResponseSchema>;

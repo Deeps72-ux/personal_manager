@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import type { LogActions, PriorityActions, TaskActions, TimerActions } from "../core/actions.ts";
+import type { FolderActions, LogActions, PriorityActions, TaskActions, TimerActions } from "../core/actions.ts";
 import type { AuthService, SessionHolder } from "../core/auth.ts";
 import type { ExportLogs } from "../core/export-logs.ts";
 import type { LocalStore } from "../core/ports.ts";
@@ -12,6 +12,7 @@ export interface Services {
   auth: AuthService;
   sync: SyncEngine;
   tasks: TaskActions;
+  folders: FolderActions;
   priority: PriorityActions;
   logs: LogActions;
   timer: TimerActions;
