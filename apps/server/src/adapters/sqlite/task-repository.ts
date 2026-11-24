@@ -10,6 +10,7 @@ const toTask = (r: Row): Task => ({
   dueDate: (r.due_date as string | null) ?? null,
   folderId: (r.folder_id as string | null) ?? null,
   folderRank: (r.folder_rank as string | null) ?? null,
+  folderTop: r.folder_top === 1,
 });
 
 /** Patch field → column. A whitelist: nothing else can ever reach the SQL. */
@@ -38,15 +39,15 @@ export class SqliteTaskRepository implements TaskRepository {
   async insert(userId: string, t: Task) {
     this.db
       .prepare(
-        "INSERT INTO tasks (user_id, id, title, description, due_date, folder_id, folder_rank) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tasks (user_id, id, title, description, due_date, folder_id, folder_rank, folder_top) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       )
-      .run(userId, t.id, t.title, t.description, t.dueDate, t.folderId ?? null, t.folderRank ?? null);
+      .run(userId, t.id, t.title, t.description, t.dueDate, t.folderId ?? null, t.folderRank ?? null, t.folderTop ? 1 : 0);
   }
 
-  async setFolder(userId: string, id: string, folderId: string | null, folderRank: string) {
+  async setFolder(userId: string, id: string, folderId: string | null, folderRank: string, folderTop: boolean) {
     this.db
-      .prepare("UPDATE tasks SET folder_id = ?, folder_rank = ? WHERE user_id = ? AND id = ?")
-      .run(folderId, folderRank, userId, id);
+      .prepare("UPDATE tasks SET folder_id = ?, folder_rank = ?, folder_top = ? WHERE user_id = ? AND id = ?")
+      .run(folderId, folderRank, folderTop ? 1 : 0, userId, id);
   }
 
   async update(userId: string, id: string, patch: TaskPatch) {

@@ -126,8 +126,8 @@ export class TaskActions {
   }
 
   /**
-   * New tasks always go to the TOP of the priority list, and to the BOTTOM
-   * of their folder in the TASKS tab.
+   * New tasks always go to the TOP of the priority list, and to the very
+   * TOP of their folder in the TASKS tab (its recent area, above the folders).
    */
   async create(input: NewTaskInput): Promise<Task> {
     // ";" ends an activity in a log, so a title cannot contain one.
@@ -141,7 +141,7 @@ export class TaskActions {
       const placements = await tx.listPlacements();
       const tree = await treeIn(tx);
       const folderId = input.folderId && tree.has(input.folderId) ? input.folderId : null;
-      const task: Task = { ...parsed.data, folderId, folderRank: taskRankAt(tree, folderId, null) };
+      const task: Task = { ...parsed.data, folderId, folderRank: rankFor(tree, folderId, "task", null, TOP), folderTop: true };
       await record(tx, { op: "createTask", task, rank: rankForTop(sortedRanks(placements)) });
       return task;
     });
@@ -167,22 +167,25 @@ async function treeIn(tx: LocalTx): Promise<FolderTree> {
   return buildFolderTree(await tx.listFolders(), await tx.listTasks(), await tx.listPlacements());
 }
 
-/** Order key that puts a task at `index` of `folderId`'s tasks (`taskId` left out first). Default: the bottom. */
-function taskRankAt(tree: FolderTree, folderId: FolderId, taskId: string | null, index?: number): string {
-  const keys = tree
-    .tasks(folderId)
-    .filter((t) => t.id !== taskId)
-    .map(tree.taskKey);
-  return rankAt(keys, clampIndex(index, keys.length));
+/**
+ * Where an item goes in a folder's list: in the recent area (`top`, mixed
+ * tasks and folders) or in its own block (folders or tasks), at `index` of
+ * that part with the item itself left out (default: the end of that part).
+ */
+export interface Slot {
+  top: boolean;
+  index?: number;
 }
+/** The very top of a folder: where new and moved-in items go. */
+export const TOP: Slot = { top: true, index: 0 };
 
-/** Rank that puts a folder at `index` of `parentId`'s sub-folders (`folderId` left out first). Default: the bottom. */
-function folderRankAt(tree: FolderTree, parentId: FolderId, folderId: string | null, index?: number): string {
-  const ranks = tree
-    .folders(parentId)
-    .filter((f) => f.id !== folderId)
-    .map((f) => f.rank);
-  return rankAt(ranks, clampIndex(index, ranks.length));
+/** Order key that puts an item of `kind` at `slot` of `parent` (`selfId` left out first). */
+function rankFor(tree: FolderTree, parent: FolderId, kind: "task" | "folder", selfId: string | null, slot: Slot): string {
+  const keys = tree
+    .items(parent)
+    .filter((e) => e.id !== selfId && (slot.top ? e.top : !e.top && e.kind === kind))
+    .map((e) => e.key);
+  return rankAt(keys, clampIndex(slot.index, keys.length));
 }
 
 const clampIndex = (index: number | undefined, length: number) =>
@@ -210,12 +213,12 @@ export class FolderActions {
     this.deps = deps;
   }
 
-  /** New folder at the BOTTOM of `parentId`'s folders. Names are unique among siblings (ignoring case). */
+  /** New folder at the very TOP of `parentId` (its recent area). Names are unique among siblings (ignoring case). */
   async create(name: string, parentId: FolderId = null): Promise<string> {
     const id = await this.deps.store.write(async (tx) => {
       const tree = await treeIn(tx);
       const parent = parentId && tree.has(parentId) ? parentId : null;
-      const folder = { id: uuidv7(), name: checkName(tree, parent, name, null), parentId: parent, rank: folderRankAt(tree, parent, null) };
+      const folder = { id: uuidv7(), name: checkName(tree, parent, name, null), parentId: parent, rank: rankFor(tree, parent, "folder", null, TOP), top: true };
       await record(tx, { op: "createFolder", folder });
       return folder.id;
     });
@@ -254,11 +257,11 @@ export class FolderActions {
   }
 
   /**
-   * Move a folder into `parentId` (null = top level) at `index` of its
-   * folders (default: the bottom). Refused into itself or one of its own
-   * sub-folders, or next to a folder with the same name.
+   * Move a folder into `parentId` (null = top level) at `slot` (default: the
+   * very top). Refused into itself or one of its own sub-folders, or next to
+   * a folder with the same name.
    */
-  async moveFolder(folderId: string, parentId: FolderId, index?: number): Promise<void> {
+  async moveFolder(folderId: string, parentId: FolderId, slot: Slot = TOP): Promise<void> {
     const moved = await this.deps.store.write(async (tx) => {
       const tree = await treeIn(tx);
       const folder = tree.get(folderId);
@@ -266,23 +269,23 @@ export class FolderActions {
       const parent = parentId && tree.has(parentId) ? parentId : null;
       if (tree.contains(folderId, parent)) throw new ValidationError("A folder cannot go inside itself");
       if (parent !== tree.parentOf(folderId)) checkName(tree, parent, folder.name, folderId);
-      const rank = folderRankAt(tree, parent, folderId, index);
-      if (parent === folder.parentId && rank === folder.rank) return false;
-      await record(tx, { op: "moveFolder", folderId, parentId: parent, rank });
+      const rank = rankFor(tree, parent, "folder", folderId, slot);
+      if (parent === folder.parentId && rank === folder.rank && slot.top === !!folder.top) return false;
+      await record(tx, { op: "moveFolder", folderId, parentId: parent, rank, top: slot.top });
       return true;
     });
     if (moved) this.deps.sync.requestSync();
   }
 
-  /** Move a task into `folderId` (null = top level) at `index` of its tasks (default: the bottom). */
-  async moveTask(taskId: string, folderId: FolderId, index?: number): Promise<void> {
+  /** Move a task into `folderId` (null = top level) at `slot` (default: the very top). */
+  async moveTask(taskId: string, folderId: FolderId, slot: Slot = TOP): Promise<void> {
     const moved = await this.deps.store.write(async (tx) => {
       const tree = await treeIn(tx);
       const task = await tx.getTask(taskId);
       if (!task) return false;
       const target = folderId && tree.has(folderId) ? folderId : null;
-      const folderRank = taskRankAt(tree, target, taskId, index);
-      await record(tx, { op: "setTaskFolder", taskId, folderId: target, folderRank });
+      const folderRank = rankFor(tree, target, "task", taskId, slot);
+      await record(tx, { op: "setTaskFolder", taskId, folderId: target, folderRank, folderTop: slot.top });
       return true;
     });
     if (moved) this.deps.sync.requestSync();

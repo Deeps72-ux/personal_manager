@@ -199,6 +199,41 @@ describe("PWA UI", () => {
     );
   });
 
+  it("cards outside TASKS show the task's own folder (the last one when nested); top-level tasks show none", async () => {
+    const { user, services } = renderApp();
+    await signUp(user);
+    const work = await services.folders.create("Work");
+    const deep = await services.folders.create("Deep", work);
+    await services.tasks.create({ title: "nested", folderId: deep });
+    await services.tasks.create({ title: "loose" });
+
+    await user.click(nav().getByRole("button", { name: /Priority/ }));
+    const nested = await screen.findByRole("button", { name: /^\d+\. nested$/ });
+    await waitFor(() => expect(nested.querySelector(".folder-chip")?.textContent).toBe("Deep"));
+    expect(screen.getByRole("button", { name: /^\d+\. loose$/ }).querySelector(".folder-chip")).toBeNull();
+
+    // Renaming the folder updates the card.
+    await services.folders.rename(deep, "Deeper");
+    await waitFor(() => expect(nested.querySelector(".folder-chip")?.textContent).toBe("Deeper"));
+  });
+
+  it("TASKS: new tasks and folders go to the very top, above older folders", async () => {
+    const { user } = renderApp();
+    await signUp(user);
+    await user.click(nav().getByRole("button", { name: /Tasks/ }));
+    await user.click(screen.getByRole("button", { name: /New folder/ }));
+    await user.type(screen.getByLabelText("New folder name"), "Work{Enter}");
+    await screen.findByRole("button", { name: "Open Work, 0 tasks" });
+    await user.type(screen.getByLabelText("Title"), "first");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await user.type(screen.getByLabelText("Title"), "second");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await screen.findByText("second");
+    const rows = () =>
+      [...document.querySelectorAll(".itemlist .folder-name, .itemlist .taskcard h3")].map((n) => n.textContent);
+    await waitFor(() => expect(rows()).toEqual(["second", "first", "Work"]));
+  });
+
   it("TASKS remembers the open folder on this device", async () => {
     const { user } = renderApp();
     await signUp(user);

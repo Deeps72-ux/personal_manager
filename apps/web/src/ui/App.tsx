@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { User } from "@pm/shared";
 import { AuthScreen } from "./AuthScreen.tsx";
 import { ConflictBanner } from "./ConflictBanner.tsx";
+import { FolderNamesProvider } from "./folder-chip.tsx";
 import { activeFeatures, resolveFeatureId } from "./features.tsx";
 import { useLive, useServices } from "./services.tsx";
 import { SyncBadge } from "./SyncBadge.tsx";
@@ -94,7 +95,9 @@ function Shell({ user }: { user: User }) {
 
       <main className="content">
         <ConflictBanner />
-        {FEATURE_LIST.map(({ id, View }) => id === tab && <View key={id} navigate={choose} />)}
+        <FolderNamesProvider>
+          {FEATURE_LIST.map(({ id, View }) => id === tab && <View key={id} navigate={choose} />)}
+        </FolderNamesProvider>
       </main>
 
       <nav className="tabs tabs-bottom" aria-label="Sections">

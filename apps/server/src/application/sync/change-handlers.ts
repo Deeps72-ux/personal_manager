@@ -203,7 +203,7 @@ export const changeHandlers: ChangeHandlers = {
     return applied;
   },
 
-  async moveFolder(repos, { userId, nowMs }, { folderId, parentId, rank }) {
+  async moveFolder(repos, { userId, nowMs }, { folderId, parentId, rank, top }) {
     if (!(await repos.folders.get(userId, folderId))) return missingFolder(repos, userId, folderId);
     // Two devices apart may each move one folder into the other: the later
     // one is refused, and the folder is sent again so that device undoes it.
@@ -211,7 +211,7 @@ export const changeHandlers: ChangeHandlers = {
       await repos.changeLog.append(userId, "folders", folderId, "upsert", nowMs);
       return ignored("invalid");
     }
-    await repos.folders.move(userId, folderId, parentId, rank);
+    await repos.folders.move(userId, folderId, parentId, rank, top ?? false);
     await repos.changeLog.append(userId, "folders", folderId, "upsert", nowMs);
     return applied;
   },
@@ -225,9 +225,9 @@ export const changeHandlers: ChangeHandlers = {
     return applied;
   },
 
-  async setTaskFolder(repos, { userId, nowMs }, { taskId, folderId, folderRank }) {
+  async setTaskFolder(repos, { userId, nowMs }, { taskId, folderId, folderRank, folderTop }) {
     if (!(await repos.tasks.get(userId, taskId))) return missingTask(repos, userId, taskId);
-    await repos.tasks.setFolder(userId, taskId, folderId, folderRank);
+    await repos.tasks.setFolder(userId, taskId, folderId, folderRank, folderTop ?? false);
     await repos.changeLog.append(userId, "tasks", taskId, "upsert", nowMs);
     return applied;
   },

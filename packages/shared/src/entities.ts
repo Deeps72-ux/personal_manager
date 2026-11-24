@@ -26,9 +26,12 @@ const Description = z.string().max(LIMITS.descriptionMax).nullable();
 
 /**
  * `folderId` / `folderRank`: where the task sits in the TASKS tab (a folder,
- * null = top level) and its manual order there. They only shape the TASKS
- * tab: every other screen ignores them. Missing/null rank = a task from an
- * older version, ordered by its priority rank until it is moved.
+ * null = top level) and its manual order there. `folderTop`: it sits in the
+ * folder's "recent" area, above the sub-folders (new and moved-in tasks do,
+ * until dragged out). They only shape the TASKS tab: every other screen
+ * ignores them, except that cards show the name of the task's folder.
+ * Missing/null rank = a task from an older version, ordered by its priority
+ * rank until it is moved.
  */
 export const TaskSchema = z.strictObject({
   id: IdSchema,
@@ -37,6 +40,7 @@ export const TaskSchema = z.strictObject({
   dueDate: DaySchema.nullable(),
   folderId: IdSchema.nullish(),
   folderRank: RankSchema.nullish(),
+  folderTop: z.boolean().nullish(),
 });
 export type Task = z.infer<typeof TaskSchema>;
 
@@ -45,13 +49,16 @@ export type Task = z.infer<typeof TaskSchema>;
  * have a manual order among their siblings (`rank`). They group tasks for
  * browsing only: they never change how tasks behave anywhere else.
  * A folder whose parent no longer exists (deleted on another device) shows
- * at the top level.
+ * at the top level. `top`: it sits in its parent's "recent" area, mixed with
+ * recent tasks and above the other folders (new and moved-in folders do,
+ * until dragged out).
  */
 export const FolderSchema = z.strictObject({
   id: IdSchema,
   name: Title,
   parentId: IdSchema.nullable(),
   rank: RankSchema,
+  top: z.boolean().nullish(),
 });
 export type Folder = z.infer<typeof FolderSchema>;
 

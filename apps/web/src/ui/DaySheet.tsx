@@ -7,6 +7,7 @@ import { chipText, formatDayLong, pad2, pickOrder } from "../core/views.ts";
 import { cardLook, useActivityHue } from "./colors.ts";
 import { ChevronLeft, XIcon } from "./icons.tsx";
 import { useLive, useServices } from "./services.tsx";
+import { FolderChip, useFolderName } from "./folder-chip.tsx";
 import { SplitBar } from "./SplitBar.tsx";
 
 const clock = (t: number) => {
@@ -34,6 +35,7 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
   const history = useLive((s) => s.store.listHistory(), []);
   const tasks = useLive(async (s) => pickOrder(await s.store.listTasks(), await s.store.listPlacements()), []);
   const purgedBefore = useLive((s) => s.store.purgedBefore(), []);
+  const folderName = useFolderName();
   const hue = useActivityHue();
   const input = useRef<HTMLInputElement>(null);
 
@@ -160,7 +162,8 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
                     onClick={() => (picked ? setText(chipText(t.title)) : setError("Tap a piece of the bar first"))}
                   >
                     <span className="chip" style={{ "--hue": cardLook(t.id).hue } as CSSProperties}>
-                      {t.title}
+                      <span className="chip-title">{t.title}</span>
+                      <FolderChip name={folderName(t)} />
                     </span>
                   </button>
                 ))}

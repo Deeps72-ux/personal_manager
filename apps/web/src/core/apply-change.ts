@@ -67,7 +67,7 @@ export async function applyChangeLocally(tx: LocalTx, change: Change): Promise<v
       const f = await tx.getFolder(change.folderId);
       // Same refusal as the server: never put a folder inside itself.
       if (f && !(change.parentId !== null && (await isSelfOrAncestor(tx, f.id, change.parentId)))) {
-        await tx.putFolder({ ...f, parentId: change.parentId, rank: change.rank });
+        await tx.putFolder({ ...f, parentId: change.parentId, rank: change.rank, top: change.top ?? false });
       }
       return;
     }
@@ -76,7 +76,9 @@ export async function applyChangeLocally(tx: LocalTx, change: Change): Promise<v
       return;
     case "setTaskFolder": {
       const task = await tx.getTask(change.taskId);
-      if (task) await tx.putTask({ ...task, folderId: change.folderId, folderRank: change.folderRank });
+      if (task) {
+        await tx.putTask({ ...task, folderId: change.folderId, folderRank: change.folderRank, folderTop: change.folderTop ?? false });
+      }
       return;
     }
     case "purgeLogsBefore": {

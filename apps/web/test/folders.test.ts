@@ -10,14 +10,15 @@ import { applyChangeLocally } from "../src/core/apply-change.ts";
 import { buildFolderTree } from "../src/core/folders.ts";
 import { priorityOrder } from "../src/core/views.ts";
 
-const folder = (id: string, parentId: string | null, rank = "a0"): Folder => ({ id, name: id, parentId, rank });
-const task = (id: string, folderId: string | null, folderRank: string | null): Task => ({
+const folder = (id: string, parentId: string | null, rank = "a0", top = false): Folder => ({ id, name: id, parentId, rank, top });
+const task = (id: string, folderId: string | null, folderRank: string | null, folderTop = false): Task => ({
   id,
   title: id,
   description: null,
   dueDate: null,
   folderId,
   folderRank,
+  folderTop,
 });
 
 describe("buildFolderTree", () => {
@@ -51,6 +52,23 @@ describe("buildFolderTree", () => {
     expect(tree.tasks(null).map((t) => t.id)).toEqual(["t"]);
   });
 
+  it("lists the recent area first (tasks and folders mixed), then folders, then tasks", () => {
+    const tree = buildFolderTree(
+      [folder("f1", null, "a0"), folder("f2", null, "a1"), folder("newF", null, "Zz", true)],
+      [task("t1", null, "a0"), task("newT", null, "Zy", true), task("moved", null, "a5", true)],
+    );
+    expect(tree.items(null).map((e) => [e.id, e.top])).toEqual([
+      ["newT", true],
+      ["newF", true],
+      ["moved", true],
+      ["f1", false],
+      ["f2", false],
+      ["t1", false],
+    ]);
+    expect(tree.folders(null).map((f) => f.id)).toEqual(["newF", "f1", "f2"]);
+    expect(tree.tasks(null).map((t) => t.id)).toEqual(["newT", "moved", "t1"]);
+  });
+
   it("a task with no TASKS-tab order yet (older version) uses its priority rank", () => {
     const tree = buildFolderTree([], [task("old", null, null), task("new", null, "a3")], [{ taskId: "old", rank: "a5" }]);
     expect(tree.tasks(null).map((t) => t.id)).toEqual(["new", "old"]);
@@ -71,7 +89,7 @@ function setup() {
 }
 
 describe("FolderActions", () => {
-  it("new folders and tasks go to the BOTTOM of their folder; priority is untouched", async () => {
+  it("new folders and tasks go to the very TOP of their folder, above older folders; priority is untouched", async () => {
     const app = setup();
     const work = await app.folders.create("Work");
     await app.folders.create("Home");
@@ -79,9 +97,10 @@ describe("FolderActions", () => {
     await app.tasks.create({ title: "b", folderId: work });
     await app.tasks.create({ title: "loose" });
     const tree = await app.tree();
-    expect(tree.folders(null).map((f) => f.name)).toEqual(["Work", "Home"]);
-    expect(tree.tasks(work).map((t) => t.title)).toEqual(["a", "b"]);
-    expect(tree.tasks(null).map((t) => t.title)).toEqual(["loose"]);
+    const names = (p: string | null) => tree.items(p).map((e) => (e.kind === "folder" ? e.folder.name : e.task.title));
+    expect(names(null)).toEqual(["loose", "Home", "Work"]);
+    expect(names(work)).toEqual(["b", "a"]);
+    expect(tree.items(null).every((e) => e.top)).toBe(true);
     // New tasks still go on top of the priority list, folder or not.
     expect(priorityOrder(await app.store.listTasks(), await app.store.listPlacements()).map((t) => t.title)).toEqual([
       "loose",
@@ -109,8 +128,9 @@ describe("FolderActions", () => {
     const a = await app.folders.create("A");
     const b = await app.folders.create("B");
     const c = await app.folders.create("C");
-    await app.folders.moveFolder(c, null, 0);
-    expect((await app.tree()).folders(null).map((f) => f.name)).toEqual(["C", "A", "B"]);
+    expect((await app.tree()).folders(null).map((f) => f.name)).toEqual(["C", "B", "A"]);
+    await app.folders.moveFolder(c, null, { top: true, index: 2 });
+    expect((await app.tree()).folders(null).map((f) => f.name)).toEqual(["B", "A", "C"]);
     await app.folders.moveFolder(b, a);
     await expect(app.folders.moveFolder(a, b)).rejects.toThrow("inside itself");
     await expect(app.folders.moveFolder(a, a)).rejects.toThrow("inside itself");
@@ -120,12 +140,55 @@ describe("FolderActions", () => {
 
     const t1 = await app.tasks.create({ title: "t1" });
     const t2 = await app.tasks.create({ title: "t2" });
-    await app.folders.moveTask(t2.id, null, 0);
-    expect((await app.tree()).tasks(null).map((t) => t.title)).toEqual(["t2", "t1"]);
+    await app.folders.moveTask(t2.id, null, { top: true, index: 1 });
+    expect((await app.tree()).tasks(null).map((t) => t.title)).toEqual(["t1", "t2"]);
     await app.folders.moveTask(t1.id, b);
     const tree = await app.tree();
     expect(tree.tasks(b).map((t) => t.title)).toEqual(["t1"]);
     expect(tree.taskCount(a)).toBe(1);
+  });
+
+  it("moved-in items land at the very top; dragged out of the recent area they join their block, and can go back", async () => {
+    const app = setup();
+    const store = app.store;
+    // Today's layout: two older folders and an older task, none recent.
+    await store.write(async (tx) => {
+      await tx.putFolder(folder(uuidv7(), null, "a0"));
+      await tx.putTask(task(uuidv7(), null, "a0"));
+    });
+    const [oldF] = await store.listFolders();
+    const [oldT] = await store.listTasks();
+    const box = await app.folders.create("Box");
+    const fresh = await app.tasks.create({ title: "fresh" });
+    const order = async (p: string | null) => (await app.tree()).items(p).map((e) => [e.id, e.top]);
+    expect(await order(null)).toEqual([
+      [fresh.id, true],
+      [box, true],
+      [oldF!.id, false],
+      [oldT!.id, false],
+    ]);
+
+    // Into Box: the very top of Box.
+    await app.folders.moveTask(oldT!.id, box);
+    await app.folders.moveFolder(oldF!.id, box);
+    expect(await order(box)).toEqual([
+      [oldF!.id, true],
+      [oldT!.id, true],
+    ]);
+
+    // Dragged out of the recent area into the tasks block, then back up.
+    await app.folders.moveTask(oldT!.id, box, { top: false, index: 0 });
+    expect(await order(box)).toEqual([
+      [oldF!.id, true],
+      [oldT!.id, false],
+    ]);
+    await app.folders.moveTask(oldT!.id, box, { top: true, index: 0 });
+    expect(await order(box)).toEqual([
+      [oldT!.id, true],
+      [oldF!.id, true],
+    ]);
+    const last = (await app.store.listOutbox()).at(-1)!;
+    expect(last).toMatchObject({ op: "setTaskFolder", folderTop: true });
   });
 
   it("removing a folder deletes its sub-folders and every task in them (they leave priority too)", async () => {
@@ -147,8 +210,8 @@ describe("FolderActions", () => {
   it("a stale local move that would make a loop is refused locally too", async () => {
     const store = new MemoryStore();
     await store.write(async (tx) => {
-      await tx.putFolder(folder("a", null));
-      await tx.putFolder(folder("b", "a"));
+      await tx.putFolder({ id: "a", name: "a", parentId: null, rank: "a0" });
+      await tx.putFolder({ id: "b", name: "b", parentId: "a", rank: "a0" });
       await applyChangeLocally(tx, { changeId: uuidv7(), op: "moveFolder", folderId: "a", parentId: "b", rank: "a0" });
     });
     expect((await store.listFolders()).find((f) => f.id === "a")!.parentId).toBeNull();

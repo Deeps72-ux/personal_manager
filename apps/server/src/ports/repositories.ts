@@ -49,7 +49,7 @@ export interface TaskRepository {
   insert(userId: string, task: Task): Promise<void>;
   update(userId: string, id: string, patch: TaskPatch): Promise<void>;
   /** Where the task sits in the TASKS tab (null = top level) and its order there. */
-  setFolder(userId: string, id: string, folderId: string | null, folderRank: string): Promise<void>;
+  setFolder(userId: string, id: string, folderId: string | null, folderRank: string, folderTop: boolean): Promise<void>;
   delete(userId: string, id: string): Promise<void>;
 }
 
@@ -59,7 +59,7 @@ export interface FolderRepository {
   listAll(userId: string): Promise<Folder[]>;
   insert(userId: string, folder: Folder): Promise<void>;
   rename(userId: string, id: string, name: string): Promise<void>;
-  move(userId: string, id: string, parentId: string | null, rank: string): Promise<void>;
+  move(userId: string, id: string, parentId: string | null, rank: string, top: boolean): Promise<void>;
   delete(userId: string, id: string): Promise<void>;
 }
 

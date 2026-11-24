@@ -43,6 +43,7 @@ export const task = (title: string, extra: Partial<Task> = {}): Task => ({
   dueDate: null,
   folderId: null,
   folderRank: null,
+  folderTop: false,
   ...extra,
 });
 

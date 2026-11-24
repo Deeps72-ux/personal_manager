@@ -8,7 +8,7 @@ import { uuidv7, type Folder } from "@pm/shared";
 import { migrate } from "../src/adapters/sqlite/database.ts";
 import { ch, newUser, task, testContainer } from "./helpers.ts";
 
-const folder = (name: string, extra: Partial<Folder> = {}): Folder => ({ id: uuidv7(), name, parentId: null, rank: "a0", ...extra });
+const folder = (name: string, extra: Partial<Folder> = {}): Folder => ({ id: uuidv7(), name, parentId: null, rank: "a0", top: false, ...extra });
 
 describe("folder ops", () => {
   it("create (idempotent), rename, move, delete reach other devices", async () => {
@@ -81,6 +81,32 @@ describe("folder ops", () => {
     ]);
     expect(gone.results[1]).toMatchObject({ status: "ignored", reason: "deleted" });
   });
+
+  it("keeps the recent-area flag of folders and tasks; an op from an older device leaves it off", async () => {
+    const c = testContainer();
+    const { userId } = await newUser(c);
+    const box = folder("Box", { top: true });
+    const inner = folder("Inner");
+    const t = task("Gym", { folderId: box.id, folderRank: "a0", folderTop: true });
+    await c.useCases.push.execute(userId, [
+      ch({ op: "createFolder", folder: box }),
+      ch({ op: "createFolder", folder: inner }),
+      ch({ op: "createTask", task: t, rank: "a0" }),
+      ch({ op: "moveFolder", folderId: inner.id, parentId: box.id, rank: "Zz", top: true }),
+    ]);
+    let snap = await c.useCases.pull.execute(userId, 0);
+    expect(snap.upserts.folders.find((f) => f.id === box.id)).toEqual(box);
+    expect(snap.upserts.folders.find((f) => f.id === inner.id)).toMatchObject({ parentId: box.id, top: true });
+    expect(snap.upserts.tasks.find((x) => x.id === t.id)).toEqual(t);
+
+    await c.useCases.push.execute(userId, [
+      ch({ op: "setTaskFolder", taskId: t.id, folderId: box.id, folderRank: "a1" }),
+      ch({ op: "moveFolder", folderId: inner.id, parentId: box.id, rank: "a0" }),
+    ]);
+    snap = await c.useCases.pull.execute(userId, 0);
+    expect(snap.upserts.tasks.find((x) => x.id === t.id)).toMatchObject({ folderRank: "a1", folderTop: false });
+    expect(snap.upserts.folders.find((f) => f.id === inner.id)).toMatchObject({ top: false });
+  });
 });
 
 describe("migration 005", () => {
@@ -89,6 +115,7 @@ describe("migration 005", () => {
     // Bring a database up to version 4 by hand-running migrate, then roll back the folders step.
     migrate(db);
     db.exec("DROP TABLE folders");
+    db.exec("ALTER TABLE tasks DROP COLUMN folder_top");
     db.exec("ALTER TABLE tasks DROP COLUMN folder_rank");
     db.exec("ALTER TABLE tasks DROP COLUMN folder_id");
     db.exec("PRAGMA user_version = 4");

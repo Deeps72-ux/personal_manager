@@ -2,6 +2,12 @@
  * The TASKS tab's folder tree, worked out from the synced rows. Pure: no
  * storage, no side effects.
  *
+ * Each folder (and the top level) lists, in order:
+ *   1. the RECENT area: tasks and folders created or moved in, mixed, by
+ *      their manual order (newest on top), until dragged out;
+ *   2. the other sub-folders, by their manual order;
+ *   3. the other tasks, by their manual order.
+ *
  * Rows from devices that were apart can disagree; the tree never breaks:
  *   - a folder whose parent is gone shows at the top level,
  *   - folders that ended up inside each other (a loop) show at the top level,
@@ -15,6 +21,11 @@ export type FolderId = string | null;
 /** Order key of a task that has none yet (older versions): its priority rank. */
 const FALLBACK_KEY = "a0";
 
+/** One row of a folder's list. `key` is its order key, `top` = in the recent area. */
+export type Entry =
+  | { kind: "folder"; id: string; folder: Folder; top: boolean; key: string }
+  | { kind: "task"; id: string; task: Task; top: boolean; key: string };
+
 export interface FolderTree {
   has(id: string): boolean;
   get(id: string): Folder | undefined;
@@ -22,9 +33,11 @@ export interface FolderTree {
   parentOf(id: string): FolderId;
   /** Where the task really shows (null = top level). */
   folderOf(task: Task): FolderId;
-  /** Sub-folders of `parent`, in their manual order. */
+  /** Everything directly in `parent`, in display order (recent area, folders, tasks). */
+  items(parent: FolderId): Entry[];
+  /** Sub-folders of `parent`, in display order. */
   folders(parent: FolderId): Folder[];
-  /** Tasks directly in `parent`, in their manual order. */
+  /** Tasks directly in `parent`, in display order. */
   tasks(parent: FolderId): Task[];
   /** The task's order key in its folder. */
   taskKey(task: Task): string;
@@ -53,13 +66,19 @@ export function buildFolderTree(
   const taskKey = (t: Task) => t.folderRank ?? priorityRank.get(t.id) ?? FALLBACK_KEY;
   const folderOf = (t: Task): FolderId => (t.folderId && byId.has(t.folderId) ? t.folderId : null);
 
+  const children = new Map<FolderId, Entry[]>();
+  for (const f of folderRows) push(children, parent.get(f.id)!, { kind: "folder", id: f.id, folder: f, top: !!f.top, key: f.rank });
+  for (const t of taskRows) push(children, folderOf(t), { kind: "task", id: t.id, task: t, top: !!t.folderTop, key: taskKey(t) });
+  const group = (e: Entry) => (e.top ? 0 : e.kind === "folder" ? 1 : 2);
+  for (const list of children.values()) {
+    list.sort((a, b) => group(a) - group(b) || compareRanked({ id: a.id, rank: a.key }, { id: b.id, rank: b.key }));
+  }
   const childFolders = new Map<FolderId, Folder[]>();
-  for (const f of folderRows) push(childFolders, parent.get(f.id)!, f);
-  for (const list of childFolders.values()) list.sort(compareRanked);
-
   const childTasks = new Map<FolderId, Task[]>();
-  for (const t of taskRows) push(childTasks, folderOf(t), t);
-  for (const list of childTasks.values()) list.sort((a, b) => compareRanked({ id: a.id, rank: taskKey(a) }, { id: b.id, rank: taskKey(b) }));
+  for (const [p, list] of children) {
+    childFolders.set(p, list.flatMap((e) => (e.kind === "folder" ? [e.folder] : [])));
+    childTasks.set(p, list.flatMap((e) => (e.kind === "task" ? [e.task] : [])));
+  }
 
   const descendants = (id: string): Folder[] =>
     (childFolders.get(id) ?? []).flatMap((f) => [f, ...descendants(f.id)]);
@@ -69,6 +88,7 @@ export function buildFolderTree(
     get: (id) => byId.get(id),
     parentOf: (id) => parent.get(id) ?? null,
     folderOf,
+    items: (p) => children.get(p) ?? [],
     folders: (p) => childFolders.get(p) ?? [],
     tasks: (p) => childTasks.get(p) ?? [],
     taskKey,

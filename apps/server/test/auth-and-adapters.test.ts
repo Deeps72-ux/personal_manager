@@ -86,9 +86,9 @@ describe("migrations", () => {
   it("are applied once and re-running is a no-op", () => {
     const db = openDatabase(":memory:");
     const version = () => (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-    expect(version()).toBe(5);
+    expect(version()).toBe(6);
     migrate(db);
-    expect(version()).toBe(5);
+    expect(version()).toBe(6);
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[]).map(
       (t) => t.name,
     );

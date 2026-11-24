@@ -13,7 +13,8 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { LIMITS, type Folder, type Task } from "@pm/shared";
-import { buildFolderTree, type FolderId, type FolderTree } from "../core/folders.ts";
+import type { Slot } from "../core/actions.ts";
+import { buildFolderTree, type Entry, type FolderId, type FolderTree } from "../core/folders.ts";
 import { FolderIcon, FolderPlusIcon, MoveIcon, PencilIcon, XIcon } from "./icons.tsx";
 import { useLive, useServices } from "./services.tsx";
 import { TaskCard } from "./TaskCard.tsx";
@@ -116,12 +117,11 @@ export function TasksView() {
     }
   };
 
-  const moveTo = (item: Item, target: FolderId, index?: number) =>
-    attempt(() => (item.kind === "task" ? folders.moveTask(item.id, target, index) : folders.moveFolder(item.id, target, index)));
+  const moveTo = (item: Item, target: FolderId, slot?: Slot) =>
+    attempt(() => (item.kind === "task" ? folders.moveTask(item.id, target, slot) : folders.moveFolder(item.id, target, slot)));
 
   const here = tree?.get(current ?? "");
-  const subFolders = tree?.folders(current) ?? [];
-  const hereTasks = tree?.tasks(current) ?? [];
+  const entries = tree?.items(current) ?? [];
   const total = !tree ? 0 : current === null ? (data?.tasks.length ?? 0) : tree.taskCount(current);
 
   return (
@@ -190,37 +190,9 @@ export function TasksView() {
             </p>
           )}
 
-          {(subFolders.length > 0 || creating) && (
-            <ul className="folderlist" aria-label="Folders">
-              {subFolders.map((f) => (
-                <FolderRow
-                  key={f.id}
-                  folder={f}
-                  tree={tree}
-                  renaming={renaming === f.id}
-                  confirming={confirm === `folder:${f.id}`}
-                  onOpen={() => open(f.id)}
-                  onRename={() => {
-                    setRenaming(f.id);
-                    setConfirm(null);
-                    setError(null);
-                  }}
-                  onRenamed={async (name) => {
-                    const ok = await attempt(() => folders.rename(f.id, name));
-                    if (ok) setRenaming(null);
-                  }}
-                  onCancelRename={() => {
-                    setRenaming(null);
-                    setError(null);
-                  }}
-                  onMove={() => setMoving({ kind: "folder", id: f.id })}
-                  onAskRemove={() => setConfirm(`folder:${f.id}`)}
-                  onRemove={() => void folders.remove(f.id).then(() => setConfirm(null))}
-                  onKeep={() => setConfirm(null)}
-                />
-              ))}
-              {creating && (
-                <NewFolderRow
+          {creating && (
+            <ul className="folderlist" aria-label="New folder">
+              <NewFolderRow
                   onCreate={async (name) => {
                     const ok = await attempt(() => folders.create(name, current));
                     if (ok) setCreating(false);
@@ -230,59 +202,102 @@ export function TasksView() {
                     setError(null);
                   }}
                 />
-              )}
             </ul>
           )}
 
-          {subFolders.length === 0 && hereTasks.length === 0 && !creating && (
+          {entries.length === 0 && !creating && (
             <p className="empty">{current === null ? "No tasks yet. Add your first one above." : "No tasks or folders yet."}</p>
           )}
 
-          <div className="cardlist">
-            {hereTasks.map((t) => (
-              <TaskItem
-                key={t.id}
-                task={t}
-                actions={
-                  confirm === `task:${t.id}` ? (
-                    <span className="inline-confirm">
-                      <button className="danger small" onClick={() => void tasks.remove(t.id).then(() => setConfirm(null))}>
-                        Remove
-                      </button>
-                      <button className="ghost small" onClick={() => setConfirm(null)}>
-                        Keep
-                      </button>
-                    </span>
-                  ) : (
-                    <>
-                      <button
-                        className="icon"
-                        aria-label={`Move ${t.title}`}
-                        title="Move to…"
-                        onClick={() => setMoving({ kind: "task", id: t.id })}
-                      >
-                        <MoveIcon />
-                      </button>
-                      <button
-                        className="icon"
-                        aria-label={`Remove ${t.title}`}
-                        title="Remove"
-                        onClick={() => setConfirm(`task:${t.id}`)}
-                      >
-                        <XIcon />
-                      </button>
-                    </>
-                  )
-                }
-              />
-            ))}
+          <div className="itemlist">
+            {runs(entries).map((run) =>
+              run[0]!.kind === "folder" ? (
+                <ul key={run[0]!.id} className="folderlist" aria-label="Folders">
+                  {run.map((e) => {
+                    if (e.kind !== "folder") return null;
+                    const f = e.folder;
+                    return (
+                      <FolderRow
+                        key={f.id}
+                        folder={f}
+                        tree={tree}
+                        renaming={renaming === f.id}
+                        confirming={confirm === `folder:${f.id}`}
+                        onOpen={() => open(f.id)}
+                        onRename={() => {
+                          setRenaming(f.id);
+                          setConfirm(null);
+                          setError(null);
+                        }}
+                        onRenamed={async (name) => {
+                          const ok = await attempt(() => folders.rename(f.id, name));
+                          if (ok) setRenaming(null);
+                        }}
+                        onCancelRename={() => {
+                          setRenaming(null);
+                          setError(null);
+                        }}
+                        onMove={() => setMoving({ kind: "folder", id: f.id })}
+                        onAskRemove={() => setConfirm(`folder:${f.id}`)}
+                        onRemove={() => void folders.remove(f.id).then(() => setConfirm(null))}
+                        onKeep={() => setConfirm(null)}
+                      />
+                    );
+                  })}
+                </ul>
+              ) : (
+                <div key={run[0]!.id} className="cardlist">
+                  {run.map((e) => {
+                    if (e.kind !== "task") return null;
+                    const t = e.task;
+                    return (
+                      <TaskItem
+                      key={t.id}
+                      task={t}
+                      actions={
+                        confirm === `task:${t.id}` ? (
+                          <span className="inline-confirm">
+                            <button className="danger small" onClick={() => void tasks.remove(t.id).then(() => setConfirm(null))}>
+                              Remove
+                            </button>
+                            <button className="ghost small" onClick={() => setConfirm(null)}>
+                              Keep
+                            </button>
+                          </span>
+                        ) : (
+                          <>
+                            <button
+                              className="icon"
+                              aria-label={`Move ${t.title}`}
+                              title="Move to…"
+                              onClick={() => setMoving({ kind: "task", id: t.id })}
+                            >
+                              <MoveIcon />
+                            </button>
+                            <button
+                              className="icon"
+                              aria-label={`Remove ${t.title}`}
+                              title="Remove"
+                              onClick={() => setConfirm(`task:${t.id}`)}
+                            >
+                              <XIcon />
+                            </button>
+                          </>
+                        )
+                      }
+                    />
+                    );
+                  })}
+                </div>
+              ),
+            )}
           </div>
         </FolderBrowser>
       )}
       {data && data.tasks.length + data.folders.length > 0 && (
         <p className="hint">
-          Drag a card or folder onto a folder to move it in, or onto a name in the path above to move it out. Removing a task
-          never changes days you already logged.
+          New tasks and folders, and anything moved in, go to the very top. Drag a card or folder onto a folder to move it in,
+          or onto a name in the path above to move it out. Removing a task never changes days you already logged.
         </p>
       )}
 
@@ -303,13 +318,36 @@ export function TasksView() {
   );
 }
 
-/** Apply a finished drag. Reordering stays inside `current`; "into" moves to the bottom of that folder. */
+/** Runs of neighbouring rows of the same kind: folders render as a list, tasks as cards. */
+function runs(entries: readonly Entry[]): Entry[][] {
+  const out: Entry[][] = [];
+  for (const e of entries) {
+    const last = out.at(-1);
+    if (last && last[0]!.kind === e.kind) last.push(e);
+    else out.push([e]);
+  }
+  return out;
+}
+
+/** `current`'s rows without the dragged item, and the row `over` among them. */
+function around(tree: FolderTree, current: FolderId, item: Item, over: Item) {
+  const list = tree.items(current).filter((e) => !(e.kind === item.kind && e.id === item.id));
+  const entry = list.find((e) => e.kind === over.kind && e.id === over.id);
+  return { list, entry };
+}
+
+/**
+ * Apply a finished drag. "into" moves to the very top of that folder.
+ * Next to a row: beside a recent row it joins the recent area; beside a row
+ * of its own kind it joins that block; above the very first row (of the
+ * other kind) it goes to the recent area.
+ */
 async function dropItem(
   tree: FolderTree,
   current: FolderId,
   item: Item,
   drop: Drop,
-  moveTo: (item: Item, target: FolderId, index?: number) => Promise<boolean>,
+  moveTo: (item: Item, target: FolderId, slot?: Slot) => Promise<boolean>,
 ) {
   const over = drop.target === "root" ? null : parseItem(drop.target);
   if (drop.zone === "into") {
@@ -317,11 +355,18 @@ async function dropItem(
     await moveTo(item, target);
     return;
   }
-  if (!over || over.kind !== item.kind) return;
-  const list = (item.kind === "task" ? tree.tasks(current) : tree.folders(current)).map((x) => x.id).filter((id) => id !== item.id);
-  const at = list.indexOf(over.id);
-  if (at < 0) return;
-  await moveTo(item, current, drop.zone === "after" ? at + 1 : at);
+  if (!over) return;
+  const { list, entry } = around(tree, current, item, over);
+  if (!entry) return;
+  const after = drop.zone === "after" ? 1 : 0;
+  if (entry.top || entry.kind !== item.kind) {
+    const top = list.filter((e) => e.top);
+    const at = top.indexOf(entry);
+    await moveTo(item, current, { top: true, index: at < 0 ? top.length : at + after });
+    return;
+  }
+  const block = list.filter((e) => !e.top && e.kind === item.kind);
+  await moveTo(item, current, { top: false, index: block.indexOf(entry) + after });
 }
 
 // ───────────── drag and drop ─────────────
@@ -334,8 +379,12 @@ function pointerY(e: DragMoveEvent): number | null {
   return typeof y === "number" ? y + e.delta.y : null;
 }
 
-/** Where `item` would land over `overId`, given how far down the target the pointer is (0..1). */
-export function dropZone(tree: FolderTree, item: Item, overId: string, frac: number): Drop | null {
+/**
+ * Where `item` would land over `overId` in `current`, given how far down the
+ * target the pointer is (0..1). It can go next to a recent row, next to a row
+ * of its own kind, or above the very first row; over a folder's middle, into it.
+ */
+export function dropZone(tree: FolderTree, current: FolderId, item: Item, overId: string, frac: number): Drop | null {
   if (overId === itemId(item)) return null;
   if (overId.startsWith("crumb:")) {
     const target = overId.slice("crumb:".length);
@@ -344,14 +393,16 @@ export function dropZone(tree: FolderTree, item: Item, overId: string, frac: num
   }
   const over = parseItem(overId);
   if (!over) return null;
-  if (item.kind === "task") {
-    if (over.kind === "folder") return { target: overId, zone: "into" };
-    return { target: overId, zone: frac < 0.5 ? "before" : "after" };
+  const { list, entry } = around(tree, current, item, over);
+  if (!entry) return null;
+  const beside = entry.top || entry.kind === item.kind;
+  const fits = (side: "before" | "after") => beside || (side === "before" && list[0] === entry);
+  if (entry.kind === "folder") {
+    const edge = frac < 0.25 ? "before" : frac > 0.75 ? "after" : null;
+    return { target: overId, zone: edge && fits(edge) ? edge : "into" };
   }
-  if (over.kind === "task") return null;
-  if (frac < 0.25) return { target: overId, zone: "before" };
-  if (frac > 0.75) return { target: overId, zone: "after" };
-  return { target: overId, zone: "into" };
+  const half = frac < 0.5 ? "before" : "after";
+  return fits(half) ? { target: overId, zone: half } : null;
 }
 
 /** The drop the current drag would make, for the targets to light up. */
@@ -386,7 +437,7 @@ function FolderBrowser({
     const y = pointerY(e);
     if (!item || !e.over || y === null) return update(null);
     const r = e.over.rect;
-    update(dropZone(tree, item, String(e.over.id), r.height > 0 ? (y - r.top) / r.height : 0.5));
+    update(dropZone(tree, current, item, String(e.over.id), r.height > 0 ? (y - r.top) / r.height : 0.5));
   };
 
   const end = () => {

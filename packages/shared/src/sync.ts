@@ -58,17 +58,28 @@ export const ChangeSchema = z.discriminatedUnion("op", [
   // ── TASKS tab folders: browsing only, no effect anywhere else ──
   z.strictObject({ ...base, op: z.literal("createFolder"), folder: FolderSchema }),
   z.strictObject({ ...base, op: z.literal("renameFolder"), folderId: IdSchema, name: FolderSchema.shape.name }),
-  /** Into `parentId` (null = top level) at `rank`. Refused if it would put a folder inside itself. */
-  z.strictObject({ ...base, op: z.literal("moveFolder"), folderId: IdSchema, parentId: IdSchema.nullable(), rank: RankSchema }),
+  /**
+   * Into `parentId` (null = top level) at `rank`, in the recent area if `top`.
+   * Refused if it would put a folder inside itself.
+   */
+  z.strictObject({
+    ...base,
+    op: z.literal("moveFolder"),
+    folderId: IdSchema,
+    parentId: IdSchema.nullable(),
+    rank: RankSchema,
+    top: z.boolean().optional(),
+  }),
   /** Hard delete of ONE folder. The device sends the deletes of its tasks and sub-folders too. */
   z.strictObject({ ...base, op: z.literal("deleteFolder"), folderId: IdSchema }),
-  /** Put a task in a folder (null = top level) at `folderRank` in the TASKS tab. */
+  /** Put a task in a folder (null = top level) at `folderRank` in the TASKS tab, in the recent area if `folderTop`. */
   z.strictObject({
     ...base,
     op: z.literal("setTaskFolder"),
     taskId: IdSchema,
     folderId: IdSchema.nullable(),
     folderRank: RankSchema,
+    folderTop: z.boolean().optional(),
   }),
 ]);
 export type Change = z.infer<typeof ChangeSchema>;

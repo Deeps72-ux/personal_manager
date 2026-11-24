@@ -1803,3 +1803,61 @@ textarea {
   color: var(--primary);
   flex-shrink: 0;
 }
+
+/* TASKS: the recent area, folders and tasks, one after the other */
+.itemlist {
+  display: grid;
+  gap: 0.6rem;
+}
+.itemlist > .folderlist {
+  margin: 0;
+}
+
+/* The task's folder on cards outside the TASKS tab: one line, cut off with … */
+.folder-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.folder-chip svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+.folder-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip .chip-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip .folder-chip {
+  margin-top: 0.05rem;
+  font-size: 0.7rem;
+}
+.chip:has(.folder-chip) {
+  border-radius: 14px;
+}
+.timer-task-title {
+  display: block;
+}
+.queue-card-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.queue-card .folder-chip {
+  color: inherit;
+  opacity: 0.85;
+}

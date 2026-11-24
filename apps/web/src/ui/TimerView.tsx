@@ -14,6 +14,7 @@ import { cardLook, useActivityHue } from "./colors.ts";
 import { CheckIcon, XIcon } from "./icons.tsx";
 import { SplitBar } from "./SplitBar.tsx";
 import { useLive, useServices } from "./services.tsx";
+import { FolderChip, useFolderName } from "./folder-chip.tsx";
 import { clearLegacyTimerStart, formatElapsed, readLegacyTimerStart } from "./timer-store.ts";
 
 /** A finger lifting right after the opening touch may land on ✕ or a card: ignore it. */
@@ -51,6 +52,7 @@ export function TimerView() {
   const { timer } = useServices();
   const tasks = useLive(async (s) => pickOrder(await s.store.listTasks(), await s.store.listPlacements()), []);
   const start = useLive((s) => s.store.timerStart(), []); // null until ensured
+  const folderName = useFolderName();
   const [openAt, setOpenAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -247,7 +249,8 @@ export function TimerView() {
                       onPointerDown={(e) => e.preventDefault()}
                       onClick={() => pick(t.title)}
                     >
-                      {t.title}
+                      <span className="timer-task-title">{t.title}</span>
+                      <FolderChip name={folderName(t)} />
                     </button>
                   </li>
                 ))}

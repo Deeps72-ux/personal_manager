@@ -30,6 +30,7 @@ import { CheckIcon, GripIcon, QueueIcon, XIcon } from "./icons.tsx";
 import { formatWait, heat, useNow, type Heat } from "./queue-heat.ts";
 import { useLive, useServices } from "./services.tsx";
 import { TaskCard } from "./TaskCard.tsx";
+import { FolderChip, useFolderName } from "./folder-chip.tsx";
 
 const QUEUE_ID = "waiting-queue";
 const EXIT_ID = "queue-exit";
@@ -68,6 +69,7 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [queueOpen, setQueueOpen] = useState(false);
   const now = useNow(1000);
+  const folderName = useFolderName();
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
@@ -158,13 +160,13 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
           <SortableContext items={ids} strategy={verticalListSortingStrategy}>
             <ol className="stack">
               {ids.map((id, i) => (
-                <SortableCard key={id} task={byId.get(id)!} index={i} />
+                <SortableCard key={id} task={byId.get(id)!} index={i} folder={folderName(byId.get(id)!)} />
               ))}
             </ol>
           </SortableContext>
         )}
         <DragOverlay dropAnimation={{ duration: 180, easing: "cubic-bezier(.2,.8,.2,1)" }}>
-          {active ? <TaskCard task={active} className="dragging" actions={<GripIcon />} /> : null}
+          {active ? <TaskCard task={active} className="dragging" actions={<GripIcon />} folder={folderName(active)} /> : null}
         </DragOverlay>
       </DndContext>
 
@@ -173,7 +175,7 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
   );
 }
 
-function SortableCard({ task, index }: { task: Task; index: number }) {
+function SortableCard({ task, index, folder }: { task: Task; index: number; folder: string | null }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
   return (
     <li
@@ -184,7 +186,7 @@ function SortableCard({ task, index }: { task: Task; index: number }) {
       {...listeners}
       aria-label={`${index + 1}. ${task.title}`}
     >
-      <TaskCard task={task} index={index} actions={<GripIcon />} />
+      <TaskCard task={task} index={index} actions={<GripIcon />} folder={folder} />
     </li>
   );
 }
@@ -305,9 +307,13 @@ function QueueModal({ queue, now, onClose }: { queue: readonly QueuedTask[]; now
 
 function QueueCard({ item, now }: { item: QueuedTask; now: number }) {
   const h = heat(now - item.queuedAt);
+  const folderName = useFolderName();
   return (
     <div className={`queue-card ${h.pulse ? "pulsing" : ""}`}>
-      <span className="queue-card-title">{item.task.title}</span>
+      <span className="queue-card-main">
+        <span className="queue-card-title">{item.task.title}</span>
+        <FolderChip name={folderName(item.task)} />
+      </span>
       <span className="queue-card-wait">waiting {formatWait(now - item.queuedAt)}</span>
     </div>
   );
