@@ -8,6 +8,7 @@
 import {
   DaySchema,
   LIMITS,
+  MAX_PRIORITY_RANK,
   activityKey,
   TaskSchema,
   dayBounds,
@@ -33,7 +34,7 @@ import { ValidationError } from "./errors.ts";
 import type { LocalStore, LocalTx, SyncTrigger } from "./ports.ts";
 import { piecesToLog, singleSegment, type LoggedPiece, type Segment } from "./split.ts";
 import { dayLayout, fitsInFree } from "./timeline.ts";
-import { canConfirm, priorityOrder, sortedRanks, visibleTitles } from "./views.ts";
+import { canConfirm, isQueued, priorityOrder, rankedList, sortedRanks, visibleOrder, type RankedCard } from "./views.ts";
 
 async function record(tx: LocalTx, c: NewChange): Promise<Change> {
   const change = { changeId: uuidv7(), ...c } as Change;
@@ -99,13 +100,13 @@ interface Deps {
  * and un-queuing never score until confirmed. Returns true if recorded.
  */
 async function recordConfirmed(tx: LocalTx, now: number): Promise<boolean> {
-  const titles = visibleTitles(await tx.listTasks(), await tx.listPlacements());
+  const { titles, ranks } = visibleOrder(await tx.listTasks(), await tx.listPlacements(), await tx.listFolders());
   const history = await tx.listHistory();
-  if (!canConfirm(titles, latestConfirmed(history))) return false;
+  if (!canConfirm({ titles, ranks }, latestConfirmed(history))) return false;
   // Strictly after the latest snapshot, so two in the same millisecond keep their order.
   const last = history.at(-1);
   const at = last ? Math.max(now, last.at + 1) : now;
-  await record(tx, { op: "recordPriority", snapshot: { id: uuidv7(at), at, titles, confirmed: true } });
+  await record(tx, { op: "recordPriority", snapshot: { id: uuidv7(at), at, titles, ranks, confirmed: true } });
   return true;
 }
 
@@ -142,7 +143,10 @@ export class TaskActions {
       const tree = await treeIn(tx);
       const folderId = input.folderId && tree.has(input.folderId) ? input.folderId : null;
       const task: Task = { ...parsed.data, folderId, folderRank: rankFor(tree, folderId, "task", null, TOP), folderTop: true };
+      const before = await rankedIn(tx);
       await record(tx, { op: "createTask", task, rank: rankForTop(sortedRanks(placements)) });
+      // A new task erases typed ranks: positions become the list as it was shown, with it on top.
+      await eraseCardRanks(tx, [task.id, ...before.map((c) => c.task.id)]);
       return task;
     });
     this.deps.sync.requestSync();
@@ -277,6 +281,22 @@ export class FolderActions {
     if (moved) this.deps.sync.requestSync();
   }
 
+  /**
+   * Give a folder a PRIORITY rank (1 up to the number of cards in the list),
+   * or null to remove it. Every task inside it, at any depth, takes it.
+   */
+  async setPriority(folderId: string, rank: number | null): Promise<void> {
+    const done = await this.deps.store.write(async (tx) => {
+      const folder = await tx.getFolder(folderId);
+      if (!folder) return false;
+      if (rank !== null) checkRank(rank, (await rankedIn(tx)).length);
+      if ((folder.priority ?? null) === rank) return false;
+      await record(tx, { op: "setFolderPriority", folderId, priority: rank });
+      return true;
+    });
+    if (done) this.deps.sync.requestSync();
+  }
+
   /** Move a task into `folderId` (null = top level) at `slot` (default: the very top). */
   async moveTask(taskId: string, folderId: FolderId, slot: Slot = TOP): Promise<void> {
     const moved = await this.deps.store.write(async (tx) => {
@@ -323,6 +343,45 @@ async function rankInVisible(tx: LocalTx, taskId: string, toIndex: number): Prom
   return rankAt(ranks, after === null ? ranks.length : ranks.indexOf(after));
 }
 
+/** The visible PRIORITY list as shown, with each card's rank. */
+async function rankedIn(tx: LocalTx): Promise<RankedCard[]> {
+  const placements = (await tx.listPlacements()).filter((p) => !isQueued(p));
+  return rankedList(await tx.listTasks(), placements, await tx.listFolders());
+}
+
+/**
+ * A drag, the queue or a new task: every rank typed on a card is erased and
+ * the list order becomes `ids` (the visible list, top first), so positions
+ * are what the user sees. Folder ranks stay.
+ */
+async function eraseCardRanks(tx: LocalTx, ids: readonly string[]): Promise<void> {
+  const placements = await tx.listPlacements();
+  if (placements.some((p) => p.userRank !== null && p.userRank !== undefined)) await record(tx, { op: "clearTaskRanks" });
+  const visible = placements.filter((p) => !isQueued(p));
+  const current = priorityOrder(await tx.listTasks(), visible).map((t) => t.id);
+  const wanted = ids.filter((id) => visible.some((p) => p.taskId === id));
+  const same = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((id, i) => id === b[i]);
+  if (same(current, wanted)) return;
+  const keyOf = new Map(visible.map((p) => [p.taskId, p.rank]));
+  // One card moved: only its key changes (two devices moving different cards never conflict).
+  for (const x of wanted) {
+    const others = wanted.filter((id) => id !== x);
+    if (!same(current.filter((id) => id !== x), others)) continue;
+    const all = sortedRanks(visible.filter((p) => p.taskId !== x));
+    const next = others[wanted.indexOf(x)];
+    const at = next === undefined ? all.length : all.indexOf(keyOf.get(next)!);
+    await record(tx, { op: "moveTask", taskId: x, rank: rankAt(all, at) });
+    return;
+  }
+  // Otherwise fresh keys in the wanted order (queued cards keep theirs: they are not in the list).
+  const keys: string[] = [];
+  for (const id of wanted) {
+    const key = rankAt(keys, keys.length);
+    keys.push(key);
+    if (visible.find((p) => p.taskId === id)!.rank !== key) await record(tx, { op: "moveTask", taskId: id, rank: key });
+  }
+}
+
 export class PriorityActions {
   private readonly deps: Deps;
   constructor(deps: Deps) {
@@ -330,17 +389,53 @@ export class PriorityActions {
   }
 
   /**
-   * Drop `taskId` so it ends up at `toIndex` of the list. Only this card's
-   * rank changes; nothing else is renumbered.
+   * Drop `taskId` so it ends up at `toIndex` of the list as shown. Erases
+   * every rank typed on cards: positions become the new order. A card ranked
+   * by a folder, dropped among that folder's cards, only reorders them and
+   * erases nothing; dropped anywhere else, that folder loses its rank.
    */
   async move(taskId: string, toIndex: number): Promise<void> {
     const moved = await this.deps.store.write(async (tx) => {
-      const rank = await rankInVisible(tx, taskId, toIndex);
-      if (rank === null) return false;
-      await record(tx, { op: "moveTask", taskId, rank });
+      const cards = await rankedIn(tx);
+      const from = cards.findIndex((c) => c.task.id === taskId);
+      if (from < 0) return false;
+      const card = cards[from]!;
+      const to = Math.max(0, Math.min(Math.trunc(toIndex), cards.length - 1));
+      const list = cards.filter((c) => c !== card);
+      list.splice(to, 0, card);
+      if (card.source === "folder") {
+        const inGroup = (c: RankedCard) => c.source === "folder" && c.folderId === card.folderId;
+        const at = list.flatMap((c, i) => (inGroup(c) ? [i] : []));
+        const together = at.length > 1 ? at.at(-1)! - at[0]! === at.length - 1 : to === from;
+        if (together) return reorderGroup(tx, list.filter(inGroup));
+        await record(tx, { op: "setFolderPriority", folderId: card.folderId!, priority: null });
+      }
+      await eraseCardRanks(
+        tx,
+        list.map((c) => c.task.id),
+      );
       return true;
     });
     if (moved) this.deps.sync.requestSync();
+  }
+
+  /**
+   * Type a rank on a card (1 up to the number of cards; ties allowed), or
+   * null to go back to its position. The card moves to sit with its rank;
+   * no other card is renumbered. A folder's rank still wins over it.
+   */
+  async setRank(taskId: string, rank: number | null): Promise<void> {
+    const done = await this.deps.store.write(async (tx) => {
+      const cards = await rankedIn(tx);
+      const card = cards.find((c) => c.task.id === taskId);
+      if (!card) return false;
+      if (rank !== null) checkRank(rank, cards.length);
+      const p = await tx.getPlacement(taskId);
+      if ((p?.userRank ?? null) === rank) return false;
+      await record(tx, { op: "setTaskRank", taskId, userRank: rank });
+      return true;
+    });
+    if (done) this.deps.sync.requestSync();
   }
 
   /**
@@ -353,9 +448,11 @@ export class PriorityActions {
     const done = await this.deps.store.write(async (tx) => {
       const p = await tx.getPlacement(taskId);
       if (!p || p.queuedAt === null || p.queuedAt === undefined) return false;
+      const before = await rankedIn(tx);
       const rank = await rankInVisible(tx, taskId, 0);
       if (rank === null) return false;
       await record(tx, { op: "dequeueTask", taskId, rank });
+      await eraseCardRanks(tx, [taskId, ...before.map((c) => c.task.id)]);
       return true;
     });
     if (done) this.deps.sync.requestSync();
@@ -366,7 +463,12 @@ export class PriorityActions {
     const queued = await this.deps.store.write(async (tx) => {
       const p = await tx.getPlacement(taskId);
       if (!p || (p.queuedAt !== null && p.queuedAt !== undefined)) return false;
+      const before = await rankedIn(tx);
       await record(tx, { op: "queueTask", taskId, queuedAt: now });
+      await eraseCardRanks(
+        tx,
+        before.filter((c) => c.task.id !== taskId).map((c) => c.task.id),
+      );
       return true;
     });
     if (queued) this.deps.sync.requestSync();
@@ -398,6 +500,25 @@ export class PriorityActions {
     });
     if (done) this.deps.sync.requestSync();
   }
+}
+
+/** A folder-ranked group dragged among itself: its cards swap their order keys, nothing else changes. */
+async function reorderGroup(tx: LocalTx, group: readonly RankedCard[]): Promise<boolean> {
+  const placements = new Map((await tx.listPlacements()).map((p) => [p.taskId, p]));
+  const keys = group.map((c) => placements.get(c.task.id)!.rank).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  let changed = false;
+  for (const [i, c] of group.entries()) {
+    if (placements.get(c.task.id)!.rank === keys[i]) continue;
+    await record(tx, { op: "moveTask", taskId: c.task.id, rank: keys[i]! });
+    changed = true;
+  }
+  return changed;
+}
+
+/** A typed rank: a whole number from 1 up to `cards` (at least 1). */
+function checkRank(rank: number, cards: number): void {
+  const max = Math.min(Math.max(1, cards), MAX_PRIORITY_RANK);
+  if (!Number.isInteger(rank) || rank < 1 || rank > max) throw new ValidationError(`Rank must be a whole number from 1 to ${max}`);
 }
 
 // ───────────── LOG ─────────────

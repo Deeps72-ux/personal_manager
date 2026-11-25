@@ -50,7 +50,7 @@ const hhmm = (t: number) => {
  */
 export function TimerView() {
   const { timer } = useServices();
-  const tasks = useLive(async (s) => pickOrder(await s.store.listTasks(), await s.store.listPlacements()), []);
+  const tasks = useLive(async (s) => pickOrder(await s.store.listTasks(), await s.store.listPlacements(), await s.store.listFolders()), []);
   const start = useLive((s) => s.store.timerStart(), []); // null until ensured
   const folderName = useFolderName();
   const [openAt, setOpenAt] = useState<number | null>(null);

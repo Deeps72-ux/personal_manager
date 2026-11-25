@@ -217,6 +217,27 @@ describe("PWA UI", () => {
     await waitFor(() => expect(nested.querySelector(".folder-chip")?.textContent).toBe("Deeper"));
   });
 
+  it("PRIORITY: tap a card's # to type a rank; cards can share it; clear goes back to the position", async () => {
+    const { user, services } = renderApp();
+    await signUp(user);
+    for (const t of ["C", "B", "A"]) await services.tasks.create({ title: t });
+    await user.click(nav().getByRole("button", { name: /Priority/ }));
+    await user.click(await screen.findByRole("button", { name: "Rank 3 of C: change" }));
+    const dialog = within(screen.getByRole("dialog", { name: "Rank of C" }));
+    await user.type(dialog.getByLabelText("Rank"), "1");
+    await user.click(dialog.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    const badges = () => [...document.querySelectorAll(".stack-item")].map((li) => li.getAttribute("aria-label"));
+    await waitFor(() => expect(badges()).toEqual(["1. A", "1. C", "2. B"]));
+
+    await user.click(screen.getByRole("button", { name: "Rank 1 of C: change" }));
+    await user.type(screen.getByLabelText("Rank"), "{Backspace}9");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("from 1 to 3");
+    await user.click(screen.getByRole("button", { name: "Clear" }));
+    await waitFor(() => expect(badges()).toEqual(["1. A", "2. B", "3. C"]));
+  });
+
   it("TASKS: new tasks and folders go to the very top, above older folders", async () => {
     const { user } = renderApp();
     await signUp(user);

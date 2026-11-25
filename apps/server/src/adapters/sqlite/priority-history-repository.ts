@@ -8,6 +8,7 @@ const toSnapshot = (r: Row): PrioritySnapshot => ({
   at: Number(r.at),
   titles: JSON.parse(r.titles as string) as string[],
   ...(r.confirmed === null || r.confirmed === undefined ? {} : { confirmed: Number(r.confirmed) === 1 }),
+  ...(r.ranks === null || r.ranks === undefined ? {} : { ranks: JSON.parse(r.ranks as string) as number[] }),
 });
 
 export class SqlitePriorityHistoryRepository implements PriorityHistoryRepository {
@@ -38,7 +39,14 @@ export class SqlitePriorityHistoryRepository implements PriorityHistoryRepositor
 
   async insert(userId: string, s: PrioritySnapshot) {
     this.db
-      .prepare("INSERT INTO priority_history (user_id, id, at, titles, confirmed) VALUES (?, ?, ?, ?, ?)")
-      .run(userId, s.id, s.at, JSON.stringify(s.titles), s.confirmed === true ? 1 : s.confirmed === false ? 0 : null);
+      .prepare("INSERT INTO priority_history (user_id, id, at, titles, confirmed, ranks) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(
+        userId,
+        s.id,
+        s.at,
+        JSON.stringify(s.titles),
+        s.confirmed === true ? 1 : s.confirmed === false ? 0 : null,
+        s.ranks ? JSON.stringify(s.ranks) : null,
+      );
   }
 }

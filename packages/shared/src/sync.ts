@@ -43,6 +43,12 @@ export const ChangeSchema = z.discriminatedUnion("op", [
   z.strictObject({ ...base, op: z.literal("deleteTask"), taskId: IdSchema }),
   /** Drag-and-drop in PRIORITY: only this card's rank changes. */
   z.strictObject({ ...base, op: z.literal("moveTask"), taskId: IdSchema, rank: RankSchema }),
+  /** A rank typed on a PRIORITY card (null = back to its position). */
+  z.strictObject({ ...base, op: z.literal("setTaskRank"), taskId: IdSchema, userRank: PlacementSchema.shape.userRank.unwrap().nullable() }),
+  /** Erase every rank typed on cards (a drag, queueing or new task did it). */
+  z.strictObject({ ...base, op: z.literal("clearTaskRanks") }),
+  /** A folder's PRIORITY rank, given to every task inside it (null = none). */
+  z.strictObject({ ...base, op: z.literal("setFolderPriority"), folderId: IdSchema, priority: FolderSchema.shape.priority.unwrap().nullable() }),
   z.strictObject({ ...base, op: z.literal("createLog"), entry: LogEntrySchema }),
   z.strictObject({ ...base, op: z.literal("deleteLog"), logId: IdSchema }),
   /** Hard delete every log with day < `before`; also arms the purge guard. */

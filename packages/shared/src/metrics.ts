@@ -88,19 +88,36 @@ export const activityKey = (title: string): string => {
 
 // ───────────── deviation from the priority history ─────────────
 
-/** D of one activity against one list: 100·(m − 1)/(n + 1); not listed → m = n + 1. Null if the list is empty. */
-export function rankDeviation(activity: string, titles: readonly string[]): number | null {
-  const n = titles.length;
-  if (n === 0) return null;
+/**
+ * D of one activity against one list: 100·(m − 1)/(n + 1). Ranks can tie:
+ * `n` = number of DIFFERENT ranks in the list and `m` = the step of the
+ * activity's rank among them (1 = best; gaps don't count, so ranks 1, 1, 4
+ * are steps 1, 1, 2). Not listed → m = n + 1. `ranks` missing (older
+ * snapshots) = every title's rank is its position. Null if the list is empty.
+ */
+export function rankDeviation(activity: string, titles: readonly string[], ranks?: readonly number[] | null): number | null {
+  if (titles.length === 0) return null;
+  const rankOf = (i: number) => (ranks && ranks.length === titles.length ? ranks[i]! : i + 1);
+  const steps = [...new Set(titles.map((_, i) => rankOf(i)))].sort((a, b) => a - b);
+  const n = steps.length;
   const key = activityKey(activity);
   const i = titles.findIndex((t) => activityKey(t) === key);
-  const m = i === -1 ? n + 1 : i + 1;
+  const m = i === -1 ? n + 1 : steps.indexOf(rankOf(i)) + 1;
   return (100 * (m - 1)) / (n + 1);
+}
+
+/** Every title sharing the best rank, comma-separated (null if the list is empty). */
+export function topTitles(titles: readonly string[], ranks?: readonly number[] | null): string | null {
+  if (titles.length === 0) return null;
+  if (!ranks || ranks.length !== titles.length) return titles[0]!;
+  const best = Math.min(...ranks);
+  return titles.filter((_, i) => ranks[i] === best).join(", ");
 }
 
 export interface PriorityAt {
   at: number;
   titles: readonly string[];
+  ranks?: readonly number[] | null | undefined;
   confirmed?: boolean | null | undefined;
 }
 
@@ -123,7 +140,7 @@ export function latestConfirmed<T extends PriorityAt>(history: readonly T[]): T 
 
 /**
  * One part of a log scored against ONE snapshot. `top`: that snapshot's #1
- * task; `deviation`: the activity's D against it. Both null when no
+ * task(s) (all tied ones, comma-separated); `deviation`: the activity's D against it. Both null when no
  * snapshot was in force (before the first one ever).
  */
 export interface DeviationSlice {
@@ -160,8 +177,8 @@ export function deviationSlices(
     const from = Math.max(startMs, h[k]!.at);
     const to = Math.min(endMs, h[k + 1]?.at ?? Infinity);
     if (to <= from) continue;
-    const titles = h[k]!.titles;
-    push({ start: from, end: to, top: titles[0] ?? null, deviation: rankDeviation(activity, titles) });
+    const { titles, ranks } = h[k]!;
+    push({ start: from, end: to, top: topTitles(titles, ranks), deviation: rankDeviation(activity, titles, ranks) });
   }
   return out;
 }

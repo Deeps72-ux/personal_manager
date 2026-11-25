@@ -9,6 +9,7 @@ const toFolder = (r: Row): Folder => ({
   parentId: (r.parent_id as string | null) ?? null,
   rank: r.rank as string,
   top: r.top === 1,
+  ...(r.priority === null || r.priority === undefined ? {} : { priority: Number(r.priority) }),
 });
 
 export class SqliteFolderRepository implements FolderRepository {
@@ -33,8 +34,8 @@ export class SqliteFolderRepository implements FolderRepository {
 
   async insert(userId: string, f: Folder) {
     this.db
-      .prepare("INSERT INTO folders (user_id, id, name, parent_id, rank, top) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(userId, f.id, f.name, f.parentId, f.rank, f.top ? 1 : 0);
+      .prepare("INSERT INTO folders (user_id, id, name, parent_id, rank, top, priority) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(userId, f.id, f.name, f.parentId, f.rank, f.top ? 1 : 0, f.priority ?? null);
   }
 
   async rename(userId: string, id: string, name: string) {
@@ -45,6 +46,10 @@ export class SqliteFolderRepository implements FolderRepository {
     this.db
       .prepare("UPDATE folders SET parent_id = ?, rank = ?, top = ? WHERE user_id = ? AND id = ?")
       .run(parentId, rank, top ? 1 : 0, userId, id);
+  }
+
+  async setPriority(userId: string, id: string, priority: number | null) {
+    this.db.prepare("UPDATE folders SET priority = ? WHERE user_id = ? AND id = ?").run(priority, userId, id);
   }
 
   async delete(userId: string, id: string) {

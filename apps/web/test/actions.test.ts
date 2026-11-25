@@ -100,7 +100,7 @@ describe("PriorityActions", () => {
     await app.priority.enqueue(await id("C"), t0);
     await app.priority.enqueue(await id("D"), t0 + 1000);
     await app.priority.enqueue(await id("C"), t0 + 2000); // already waiting: unchanged
-    const split = splitPriority(await app.store.listTasks(), await app.store.listPlacements());
+    const split = splitPriority(await app.store.listTasks(), await app.store.listPlacements(), await app.store.listFolders());
     expect(split.list.map((t) => t.title)).toEqual(["A", "B"]);
     expect(split.queue.map((q) => [q.task.title, q.queuedAt])).toEqual([
       ["C", t0],
@@ -119,7 +119,7 @@ describe("PriorityActions", () => {
     await app.priority.enqueue(await id("D"), t0);
     await app.priority.enqueue(await id("C"), t0 + 1);
     await app.priority.dequeue(await id("D"));
-    const now = async () => splitPriority(await app.store.listTasks(), await app.store.listPlacements());
+    const now = async () => splitPriority(await app.store.listTasks(), await app.store.listPlacements(), await app.store.listFolders());
     expect((await now()).list.map((t) => t.title)).toEqual(["D", "A", "B"]);
     await app.priority.dequeue(await id("C"));
     expect((await now()).list.map((t) => t.title)).toEqual(["C", "D", "A", "B"]);
@@ -139,7 +139,7 @@ describe("PriorityActions", () => {
     const a = await app.tasks.create({ title: "Only" });
     await app.priority.enqueue(a.id);
     await app.priority.dequeue(a.id);
-    expect(splitPriority(await app.store.listTasks(), await app.store.listPlacements()).list.map((t) => t.title)).toEqual(["Only"]);
+    expect(splitPriority(await app.store.listTasks(), await app.store.listPlacements(), await app.store.listFolders()).list.map((t) => t.title)).toEqual(["Only"]);
   });
 
   it("moving counts positions in the VISIBLE list, skipping queued cards", async () => {
@@ -148,7 +148,7 @@ describe("PriorityActions", () => {
     const id = async (title: string) => (await app.store.listTasks()).find((t) => t.title === title)!.id;
     await app.priority.enqueue(await id("B"));
     await app.priority.move(await id("D"), 1); // visible: A, C, D → A, D, C
-    expect(splitPriority(await app.store.listTasks(), await app.store.listPlacements()).list.map((t) => t.title)).toEqual([
+    expect(splitPriority(await app.store.listTasks(), await app.store.listPlacements(), await app.store.listFolders()).list.map((t) => t.title)).toEqual([
       "A",
       "D",
       "C",

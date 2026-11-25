@@ -1861,3 +1861,49 @@ textarea {
   color: inherit;
   opacity: 0.85;
 }
+
+/* PRIORITY: the rank badge, tappable to type a rank */
+.taskcard .rank-btn {
+  background: none;
+  border: 0;
+  padding: 0.15rem 0.2rem;
+  margin: -0.15rem 0 -0.15rem -0.2rem;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 800;
+  font-size: 0.85rem;
+  color: hsl(var(--hue) 60% var(--card-accent-l));
+  cursor: pointer;
+  text-align: left;
+}
+.taskcard .rank-btn:hover {
+  background: color-mix(in srgb, hsl(var(--hue) 70% 50%) 14%, transparent);
+}
+.taskcard .rank.rank-set {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
+}
+.rank-form {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.rank-form input {
+  width: 6rem;
+}
+
+/* TASKS: a folder's priority rank */
+.folder-rank {
+  font-weight: 800;
+  font-size: 0.85rem;
+  min-width: 2rem;
+}
+.folder-rank.set {
+  color: var(--primary);
+}
+.folder-rank-label {
+  font-weight: 800;
+  color: var(--primary);
+}

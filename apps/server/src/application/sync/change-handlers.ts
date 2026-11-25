@@ -156,6 +156,27 @@ export const changeHandlers: ChangeHandlers = {
     return applied;
   },
 
+  async setTaskRank(repos, { userId, nowMs }, { taskId, userRank }) {
+    if (!(await repos.placements.get(userId, taskId))) return missingTask(repos, userId, taskId);
+    await repos.placements.setUserRank(userId, taskId, userRank);
+    await repos.changeLog.append(userId, "placements", taskId, "upsert", nowMs);
+    return applied;
+  },
+
+  async clearTaskRanks(repos, { userId, nowMs }) {
+    for (const taskId of await repos.placements.clearUserRanks(userId)) {
+      await repos.changeLog.append(userId, "placements", taskId, "upsert", nowMs);
+    }
+    return applied;
+  },
+
+  async setFolderPriority(repos, { userId, nowMs }, { folderId, priority }) {
+    if (!(await repos.folders.get(userId, folderId))) return missingFolder(repos, userId, folderId);
+    await repos.folders.setPriority(userId, folderId, priority);
+    await repos.changeLog.append(userId, "folders", folderId, "upsert", nowMs);
+    return applied;
+  },
+
   async queueTask(repos, { userId, nowMs }, { taskId, queuedAt }) {
     const p = await repos.placements.get(userId, taskId);
     if (!p) return missingTask(repos, userId, taskId);

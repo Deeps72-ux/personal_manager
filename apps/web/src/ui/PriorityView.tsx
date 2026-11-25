@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -25,7 +25,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { latestConfirmed, type Task } from "@pm/shared";
-import { canConfirm, splitPriority, type QueuedTask } from "../core/views.ts";
+import { canConfirm, splitPriority, type QueuedTask, type RankedCard } from "../core/views.ts";
 import { CheckIcon, GripIcon, QueueIcon, XIcon } from "./icons.tsx";
 import { formatWait, heat, useNow, type Heat } from "./queue-heat.ts";
 import { useLive, useServices } from "./services.tsx";
@@ -61,13 +61,20 @@ const heatStyle = (h: Heat) =>
  */
 export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
   const { priority } = useServices();
-  const data = useLive(async (s) => splitPriority(await s.store.listTasks(), await s.store.listPlacements()), []);
+  const data = useLive(
+    async (s) => ({
+      ...splitPriority(await s.store.listTasks(), await s.store.listPlacements(), await s.store.listFolders()),
+      folders: await s.store.listFolders(),
+    }),
+    [],
+  );
   const confirmed = useLive(async (s) => latestConfirmed(await s.store.listHistory()), []);
   const [confirming, setConfirming] = useState(false);
   // Optimistic order while the drop is being written, so cards never jump back.
   const [optimistic, setOptimistic] = useState<string[] | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
   const now = useNow(1000);
   const folderName = useFolderName();
 
@@ -79,11 +86,14 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
   );
 
   if (!data) return null;
-  const { list: tasks, queue } = data;
+  const { list: tasks, queue, ranked } = data;
   const byId = new Map(tasks.map((t) => [t.id, t]));
+  const cardOf = new Map(ranked.map((c) => [c.task.id, c]));
   const ids = (optimistic ?? tasks.map((t) => t.id)).filter((id) => byId.has(id));
   const active = activeId ? byId.get(activeId) : undefined;
-  const pending = confirmed !== undefined && canConfirm(tasks.map((t) => t.title), confirmed);
+  const pending =
+    confirmed !== undefined && canConfirm({ titles: ranked.map((c) => c.task.title), ranks: ranked.map((c) => c.rank) }, confirmed);
+  const editingCard = editing ? cardOf.get(editing) : undefined;
   const confirm = () => {
     if (!pending || confirming) return;
     setConfirming(true);
@@ -125,7 +135,8 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
             </h2>
             {ids.length > 0 && (
               <p className="hint">
-                Drag cards to reorder, or onto the queue to park them. On a phone, press and hold a card first.
+                Drag cards to reorder, or onto the queue to park them. On a phone, press and hold a card first. Tap a
+                card's # to give it a rank; cards can share one. Dragging erases ranks typed on cards.
               </p>
             )}
             {pending && (
@@ -160,7 +171,14 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
           <SortableContext items={ids} strategy={verticalListSortingStrategy}>
             <ol className="stack">
               {ids.map((id, i) => (
-                <SortableCard key={id} task={byId.get(id)!} index={i} folder={folderName(byId.get(id)!)} />
+                <SortableCard
+                  key={id}
+                  task={byId.get(id)!}
+                  index={i}
+                  card={optimistic ? undefined : cardOf.get(id)}
+                  folder={folderName(byId.get(id)!)}
+                  onRank={() => setEditing(id)}
+                />
               ))}
             </ol>
           </SortableContext>
@@ -171,12 +189,33 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
       </DndContext>
 
       {queueOpen && <QueueModal queue={queue} now={now} onClose={() => setQueueOpen(false)} />}
+      {editingCard && (
+        <RankDialog
+          card={editingCard}
+          max={ranked.length}
+          folderName={editingCard.folderId ? (data.folders.find((f) => f.id === editingCard.folderId)?.name ?? null) : null}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </section>
   );
 }
 
-function SortableCard({ task, index, folder }: { task: Task; index: number; folder: string | null }) {
+function SortableCard({
+  task,
+  index,
+  card,
+  folder,
+  onRank,
+}: {
+  task: Task;
+  index: number;
+  card: RankedCard | undefined;
+  folder: string | null;
+  onRank: () => void;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
+  const rank = card?.rank ?? index + 1;
   return (
     <li
       ref={setNodeRef}
@@ -184,10 +223,103 @@ function SortableCard({ task, index, folder }: { task: Task; index: number; fold
       className={`stack-item ${isDragging ? "placeholder" : ""}`}
       {...attributes}
       {...listeners}
-      aria-label={`${index + 1}. ${task.title}`}
+      aria-label={`${rank}. ${task.title}`}
     >
-      <TaskCard task={task} index={index} actions={<GripIcon />} folder={folder} />
+      <TaskCard
+        task={task}
+        index={index}
+        rank={rank}
+        rankSet={card !== undefined && card.source !== "position"}
+        onRank={onRank}
+        actions={<GripIcon />}
+        folder={folder}
+      />
     </li>
+  );
+}
+
+/**
+ * Type a card's rank (1 up to the number of cards; ties allowed) or clear it
+ * (back to its position). A folder's rank wins over a typed one.
+ */
+function RankDialog({
+  card,
+  max,
+  folderName,
+  onClose,
+}: {
+  card: RankedCard;
+  max: number;
+  folderName: string | null;
+  onClose: () => void;
+}) {
+  const { priority } = useServices();
+  const [value, setValue] = useState(card.source === "card" ? String(card.rank) : "");
+  const [error, setError] = useState<string | null>(null);
+  const run = async (rank: number | null) => {
+    setError(null);
+    try {
+      await priority.setRank(card.task.id, rank);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    void run(value.trim() === "" ? null : Number(value));
+  };
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal rank-modal" role="dialog" aria-modal="true" aria-label={`Rank of ${card.task.title}`}>
+        <div className="modal-head">
+          <h2>Rank of “{card.task.title}”</h2>
+          <button className="icon" aria-label="Close" onClick={onClose}>
+            <XIcon />
+          </button>
+        </div>
+        {card.source === "folder" && folderName && (
+          <p className="hint">
+            Ranked #{card.rank} by its folder “{folderName}”, which wins over a rank typed here. Change it on the folder in
+            the Tasks tab.
+          </p>
+        )}
+        <p className="hint">
+          Its position is #{card.position}. Cards can share a rank: doing any of the #1 cards counts as no deviation.
+        </p>
+        <form className="rank-form" onSubmit={submit} noValidate>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={max}
+            step={1}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={String(card.position)}
+            aria-label="Rank"
+            autoFocus
+          />
+          <button className="primary small">Save</button>
+          {card.source === "card" && (
+            <button type="button" className="ghost small" onClick={() => void run(null)}>
+              Clear
+            </button>
+          )}
+        </form>
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 

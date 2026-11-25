@@ -60,6 +60,7 @@ export interface FolderRepository {
   insert(userId: string, folder: Folder): Promise<void>;
   rename(userId: string, id: string, name: string): Promise<void>;
   move(userId: string, id: string, parentId: string | null, rank: string, top: boolean): Promise<void>;
+  setPriority(userId: string, id: string, priority: number | null): Promise<void>;
   delete(userId: string, id: string): Promise<void>;
 }
 
@@ -70,6 +71,9 @@ export interface PlacementRepository {
   insert(userId: string, placement: Placement): Promise<void>;
   setRank(userId: string, taskId: string, rank: string): Promise<void>;
   setQueuedAt(userId: string, taskId: string, queuedAt: number | null): Promise<void>;
+  setUserRank(userId: string, taskId: string, userRank: number | null): Promise<void>;
+  /** Erase every typed card rank; returns the task ids that had one. */
+  clearUserRanks(userId: string): Promise<string[]>;
   delete(userId: string, taskId: string): Promise<void>;
 }
 

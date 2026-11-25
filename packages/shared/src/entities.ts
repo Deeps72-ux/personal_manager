@@ -17,6 +17,9 @@ export const LIMITS = {
   descriptionMax: 5000,
 } as const;
 
+/** Highest rank a card or folder can be given in PRIORITY. */
+export const MAX_PRIORITY_RANK = 2000;
+
 export const IdSchema = z.string().refine(isUuidV7, "must be a UUIDv7");
 export const DaySchema = z.string().refine(isValidDay, "must be a real date YYYY-MM-DD");
 export const RankSchema = z.string().refine(isValidRank, "must be a fractional-index key");
@@ -51,7 +54,9 @@ export type Task = z.infer<typeof TaskSchema>;
  * A folder whose parent no longer exists (deleted on another device) shows
  * at the top level. `top`: it sits in its parent's "recent" area, mixed with
  * recent tasks and above the other folders (new and moved-in folders do,
- * until dragged out).
+ * until dragged out). `priority`: a PRIORITY rank the user gave the folder:
+ * every task inside it (at any depth) takes it, the nearest ranked folder
+ * winning. Missing/null = none.
  */
 export const FolderSchema = z.strictObject({
   id: IdSchema,
@@ -59,6 +64,7 @@ export const FolderSchema = z.strictObject({
   parentId: IdSchema.nullable(),
   rank: RankSchema,
   top: z.boolean().nullish(),
+  priority: z.int().min(1).max(MAX_PRIORITY_RANK).nullish(),
 });
 export type Folder = z.infer<typeof FolderSchema>;
 
@@ -69,11 +75,14 @@ const EpochMs = z.int().min(0).max(2 ** 48 - 1);
  * `queuedAt`: when the task was dropped into the WAITING QUEUE (epoch ms).
  * A queued task leaves the visible priority list but keeps its rank. The
  * queue is never part of the scoring order. Missing/null = not queued.
+ * `userRank`: a rank the user typed on the card (ties allowed). Missing/null
+ * = its position in the list. Erased by any drag, queueing or new task.
  */
 export const PlacementSchema = z.strictObject({
   taskId: IdSchema,
   rank: RankSchema,
   queuedAt: EpochMs.nullish(),
+  userRank: z.int().min(1).max(MAX_PRIORITY_RANK).nullish(),
 });
 export type Placement = z.infer<typeof PlacementSchema>;
 
@@ -126,11 +135,17 @@ export type TaskPatch = z.infer<typeof TaskPatchSchema>;
  * `confirmed`: true when the user pressed the confirm icon (the visible list
  * only, never the queue). Missing/null = a LEGACY snapshot that older
  * versions took on every change; those never count (see `scoringHistory`).
+ *
+ * `ranks`: the rank of each title (same order, ties allowed). Missing/null
+ * = an older snapshot: each title's rank is its position.
  */
-export const PrioritySnapshotSchema = z.strictObject({
-  id: IdSchema,
-  at: EpochMs,
-  titles: z.array(Title).max(2000),
-  confirmed: z.boolean().nullish(),
-});
+export const PrioritySnapshotSchema = z
+  .strictObject({
+    id: IdSchema,
+    at: EpochMs,
+    titles: z.array(Title).max(2000),
+    confirmed: z.boolean().nullish(),
+    ranks: z.array(z.int().min(1).max(MAX_PRIORITY_RANK)).max(2000).nullish(),
+  })
+  .refine((s) => !s.ranks || s.ranks.length === s.titles.length, "ranks must match titles");
 export type PrioritySnapshot = z.infer<typeof PrioritySnapshotSchema>;

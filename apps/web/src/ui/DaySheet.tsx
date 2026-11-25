@@ -33,7 +33,7 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
   const entries = useLive((s) => s.store.listLogsForDay(day), [day]);
   const timerStart = useLive((s) => s.store.timerStart(), []);
   const history = useLive((s) => s.store.listHistory(), []);
-  const tasks = useLive(async (s) => pickOrder(await s.store.listTasks(), await s.store.listPlacements()), []);
+  const tasks = useLive(async (s) => pickOrder(await s.store.listTasks(), await s.store.listPlacements(), await s.store.listFolders()), []);
   const purgedBefore = useLive((s) => s.store.purgedBefore(), []);
   const folderName = useFolderName();
   const hue = useActivityHue();

@@ -36,6 +36,21 @@ export async function applyChangeLocally(tx: LocalTx, change: Change): Promise<v
     case "deleteLog":
       await tx.deleteLog(change.logId);
       return;
+    case "setTaskRank": {
+      const p = await tx.getPlacement(change.taskId);
+      if (p) await tx.putPlacement({ ...p, userRank: change.userRank });
+      return;
+    }
+    case "clearTaskRanks":
+      for (const p of await tx.listPlacements()) {
+        if (p.userRank !== null && p.userRank !== undefined) await tx.putPlacement({ ...p, userRank: null });
+      }
+      return;
+    case "setFolderPriority": {
+      const f = await tx.getFolder(change.folderId);
+      if (f) await tx.putFolder({ ...f, priority: change.priority });
+      return;
+    }
     case "queueTask": {
       const p = await tx.getPlacement(change.taskId);
       if (p && (p.queuedAt === null || p.queuedAt === undefined)) await tx.putPlacement({ ...p, queuedAt: change.queuedAt });

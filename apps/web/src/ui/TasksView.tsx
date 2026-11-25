@@ -72,6 +72,7 @@ export function TasksView() {
     rememberFolder(id);
     setConfirm(null);
     setRenaming(null);
+    setRanking(null);
     setCreating(false);
     setError(null);
   };
@@ -83,6 +84,7 @@ export function TasksView() {
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null); // itemId awaiting Remove/Keep
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [ranking, setRanking] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [moving, setMoving] = useState<Item | null>(null);
 
@@ -222,6 +224,21 @@ export function TasksView() {
                         folder={f}
                         tree={tree}
                         renaming={renaming === f.id}
+                        ranking={ranking === f.id}
+                        onRankStart={() => {
+                          setRanking(f.id);
+                          setRenaming(null);
+                          setConfirm(null);
+                          setError(null);
+                        }}
+                        onRanked={async (rank) => {
+                          const ok = await attempt(() => folders.setPriority(f.id, rank));
+                          if (ok) setRanking(null);
+                        }}
+                        onCancelRank={() => {
+                          setRanking(null);
+                          setError(null);
+                        }}
                         confirming={confirm === `folder:${f.id}`}
                         onOpen={() => open(f.id)}
                         onRename={() => {
@@ -517,6 +534,10 @@ function FolderRow({
   folder,
   tree,
   renaming,
+  ranking,
+  onRankStart,
+  onRanked,
+  onCancelRank,
   confirming,
   onOpen,
   onRename,
@@ -530,6 +551,10 @@ function FolderRow({
   folder: Folder;
   tree: FolderTree;
   renaming: boolean;
+  ranking: boolean;
+  onRankStart: () => void;
+  onRanked: (rank: number | null) => Promise<void>;
+  onCancelRank: () => void;
   confirming: boolean;
   onOpen: () => void;
   onRename: () => void;
@@ -541,7 +566,9 @@ function FolderRow({
   onKeep: () => void;
 }) {
   const id = `folder:${folder.id}`;
-  const drag = useDraggable({ id, disabled: renaming });
+  const editing = renaming || ranking;
+  const drag = useDraggable({ id, disabled: editing });
+  const priority = folder.priority ?? null;
   const dropTarget = useDroppable({ id });
   const dropClass = useDropClass(id);
   const count = tree.taskCount(folder.id);
@@ -554,11 +581,13 @@ function FolderRow({
         dropTarget.setNodeRef(n);
       }}
       className={`folderrow drag-item ${drag.isDragging ? "placeholder" : ""} ${dropClass}`}
-      {...(renaming ? {} : { ...drag.attributes, ...drag.listeners })}
+      {...(editing ? {} : { ...drag.attributes, ...drag.listeners })}
       tabIndex={-1}
     >
       {renaming ? (
         <NameForm label={`Rename ${folder.name}`} initial={folder.name} onSave={onRenamed} onCancel={onCancelRename} />
+      ) : ranking ? (
+        <RankForm name={folder.name} initial={priority} onSave={onRanked} onCancel={onCancelRank} />
       ) : (
         <button className="folder-open" onClick={onOpen} aria-label={`Open ${folder.name}, ${plural(count, "task")}`}>
           <FolderIcon />
@@ -566,7 +595,7 @@ function FolderRow({
           <span className="count">{count}</span>
         </button>
       )}
-      {!renaming &&
+      {!editing &&
         (confirming ? (
           <span className="folder-confirm">
             <span className="muted">
@@ -583,6 +612,14 @@ function FolderRow({
           </span>
         ) : (
           <span className="taskcard-actions">
+            <button
+              className={`icon folder-rank ${priority !== null ? "set" : ""}`}
+              aria-label={priority !== null ? `${folder.name}: priority rank ${priority}, change` : `Give ${folder.name} a priority rank`}
+              title="Priority rank for every task inside"
+              onClick={onRankStart}
+            >
+              #{priority ?? ""}
+            </button>
             <button className="icon" aria-label={`Rename ${folder.name}`} title="Rename" onClick={onRename}>
               <PencilIcon />
             </button>
@@ -603,6 +640,57 @@ function NewFolderRow({ onCreate, onCancel }: { onCreate: (name: string) => Prom
     <li className="folderrow">
       <NameForm label="New folder name" initial="" onSave={onCreate} onCancel={onCancel} />
     </li>
+  );
+}
+
+/** Inline folder rank: a number (Enter saves), Clear removes it, Esc cancels. */
+function RankForm({
+  name,
+  initial,
+  onSave,
+  onCancel,
+}: {
+  name: string;
+  initial: number | null;
+  onSave: (rank: number | null) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial === null ? "" : String(initial));
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    void onSave(value.trim() === "" ? null : Number(value));
+  };
+  const keys = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onCancel();
+    }
+  };
+  return (
+    <form className="name-form" onSubmit={submit} noValidate>
+      <span className="folder-rank-label">#</span>
+      <input
+        aria-label={`Priority rank of ${name}`}
+        type="number"
+        inputMode="numeric"
+        min={1}
+        step={1}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={keys}
+        placeholder="Rank for every task inside"
+        autoFocus
+      />
+      <button className="primary small">Save</button>
+      {initial !== null && (
+        <button type="button" className="ghost small" onClick={() => void onSave(null)}>
+          Clear
+        </button>
+      )}
+      <button type="button" className="ghost small" onClick={onCancel}>
+        Cancel
+      </button>
+    </form>
   );
 }
 
