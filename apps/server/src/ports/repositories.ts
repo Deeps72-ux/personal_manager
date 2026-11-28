@@ -6,7 +6,7 @@
  * ISOLATION RULE: every method that reads or writes user data takes `userId`
  * as its first argument. There is no way to call a repository "for all users".
  */
-import type { Day, Folder, LogEntry, Placement, PrioritySnapshot, Task, TaskPatch } from "@pm/shared";
+import type { Day, Folder, LogEntry, Placement, PrioritySlot, PrioritySnapshot, Task, TaskPatch } from "@pm/shared";
 
 export interface UserRecord {
   id: string;
@@ -72,6 +72,7 @@ export interface PlacementRepository {
   setRank(userId: string, taskId: string, rank: string): Promise<void>;
   setQueuedAt(userId: string, taskId: string, queuedAt: number | null): Promise<void>;
   setUserRank(userId: string, taskId: string, userRank: number | null): Promise<void>;
+  setOwnRank(userId: string, taskId: string, ownRank: boolean): Promise<void>;
   /** Erase every typed card rank; returns the task ids that had one. */
   clearUserRanks(userId: string): Promise<string[]>;
   delete(userId: string, taskId: string): Promise<void>;
@@ -96,8 +97,17 @@ export interface PriorityHistoryRepository {
   insert(userId: string, snapshot: PrioritySnapshot): Promise<void>;
 }
 
+/** SCHEDULED priority lists, written whole. */
+export interface SlotRepository {
+  get(userId: string, id: string): Promise<PrioritySlot | null>;
+  getMany(userId: string, ids: readonly string[]): Promise<PrioritySlot[]>;
+  listAll(userId: string): Promise<PrioritySlot[]>;
+  put(userId: string, slot: PrioritySlot): Promise<void>;
+  delete(userId: string, id: string): Promise<void>;
+}
+
 /** "timer" rows only bump the cursor (row id = user id); the value travels in every pull. */
-export type SyncedTable = "tasks" | "placements" | "log_entries" | "priority_history" | "timer" | "folders";
+export type SyncedTable = "tasks" | "placements" | "log_entries" | "priority_history" | "timer" | "folders" | "priority_slots";
 export type ChangeOpKind = "upsert" | "delete";
 
 export interface ChangeLogEntry {
@@ -130,5 +140,6 @@ export interface Repositories {
   logs: LogRepository;
   priorityHistory: PriorityHistoryRepository;
   folders: FolderRepository;
+  slots: SlotRepository;
   changeLog: ChangeLogRepository;
 }

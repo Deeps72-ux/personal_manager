@@ -73,6 +73,7 @@ const toPlacement = (r: Row): Placement => ({
   rank: r.rank as string,
   queuedAt: r.queued_at === null || r.queued_at === undefined ? null : Number(r.queued_at),
   ...(r.user_rank === null || r.user_rank === undefined ? {} : { userRank: Number(r.user_rank) }),
+  ...(r.own_rank === null || r.own_rank === undefined ? {} : { ownRank: Number(r.own_rank) === 1 }),
 });
 
 export class SqlitePlacementRepository implements PlacementRepository {
@@ -106,8 +107,12 @@ export class SqlitePlacementRepository implements PlacementRepository {
 
   async insert(userId: string, p: Placement) {
     this.db
-      .prepare("INSERT INTO placements (user_id, task_id, rank, queued_at, user_rank) VALUES (?, ?, ?, ?, ?)")
-      .run(userId, p.taskId, p.rank, p.queuedAt ?? null, p.userRank ?? null);
+      .prepare("INSERT INTO placements (user_id, task_id, rank, queued_at, user_rank, own_rank) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(userId, p.taskId, p.rank, p.queuedAt ?? null, p.userRank ?? null, p.ownRank ? 1 : null);
+  }
+
+  async setOwnRank(userId: string, taskId: string, ownRank: boolean) {
+    this.db.prepare("UPDATE placements SET own_rank = ? WHERE user_id = ? AND task_id = ?").run(ownRank ? 1 : 0, userId, taskId);
   }
 
   async setUserRank(userId: string, taskId: string, userRank: number | null) {

@@ -41,8 +41,9 @@ export class PullChanges {
             logEntries: await repos.logs.listAll(userId),
             priorityHistory: await repos.priorityHistory.listAll(userId),
             folders: await repos.folders.listAll(userId),
+            prioritySlots: await repos.slots.listAll(userId),
           },
-          deletes: { tasks: [], placements: [], logEntries: [], folders: [] },
+          deletes: { tasks: [], placements: [], logEntries: [], folders: [], prioritySlots: [] },
         };
       }
 
@@ -82,12 +83,14 @@ async function materialize(repos: Repositories, userId: string, page: readonly C
       logEntries: await repos.logs.getMany(userId, ids("log_entries", "upsert")),
       priorityHistory: await repos.priorityHistory.getMany(userId, ids("priority_history", "upsert")),
       folders: await repos.folders.getMany(userId, ids("folders", "upsert")),
+      prioritySlots: await repos.slots.getMany(userId, ids("priority_slots", "upsert")),
     },
     deletes: {
       tasks: ids("tasks", "delete"),
       placements: ids("placements", "delete"),
       logEntries: ids("log_entries", "delete"),
       folders: ids("folders", "delete"),
+      prioritySlots: ids("priority_slots", "delete"),
     },
   };
 }

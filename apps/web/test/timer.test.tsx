@@ -212,11 +212,25 @@ describe("TimerView task cards", () => {
   it("tapping a card makes the bar exactly `title;` (one activity per log)", async () => {
     await openWithTasks(undefined, "Gym", "Read");
     fireEvent.change(bar()!, { target: { value: "something" } });
+    fireEvent.change(bar()!, { target: { value: "" } });
     fireEvent.click(card("Gym"));
     expect(barText()).toBe("Gym;");
     expect((bar() as HTMLInputElement).selectionStart).toBe(4);
+    fireEvent.change(bar()!, { target: { value: "" } });
     fireEvent.click(card("Read"));
     expect(barText()).toBe("Read;");
+  });
+
+  it("typing narrows the cards to the matching tasks, best match first", async () => {
+    await openWithTasks(undefined, "Gym", "Read a book", "Spread sheet", "Write");
+    fireEvent.change(bar()!, { target: { value: "rea" } });
+    const items = within(screen.getByRole("list", { name: "Tasks" })).getAllByRole("button");
+    expect(items.map((b) => b.textContent)).toEqual(["Read a book", "Spread sheet"]);
+    fireEvent.change(bar()!, { target: { value: "zzz" } });
+    expect(screen.queryByRole("list", { name: "Tasks" })).toBeNull();
+    expect(screen.getByText(/No matching tasks/)).toBeTruthy();
+    fireEvent.change(bar()!, { target: { value: "" } });
+    expect(within(screen.getByRole("list", { name: "Tasks" })).getAllByRole("button")).toHaveLength(4);
   });
 
   it("typing after the ';' is blocked with a message; the text stays as it was", async () => {

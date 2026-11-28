@@ -29,8 +29,8 @@ const empty: PullResponse = {
   hasMore: false,
   purgedBefore: null,
   timerStart: null,
-  upserts: { tasks: [], placements: [], logEntries: [], priorityHistory: [], folders: [] },
-  deletes: { tasks: [], placements: [], logEntries: [], folders: [] },
+  upserts: { tasks: [], placements: [], logEntries: [], priorityHistory: [], folders: [], prioritySlots: [] },
+  deletes: { tasks: [], placements: [], logEntries: [], folders: [], prioritySlots: [] },
 };
 
 describe("SyncEngine retries by itself", () => {

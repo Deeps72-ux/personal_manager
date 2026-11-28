@@ -45,13 +45,23 @@ export function App() {
     sync.start();
     // After each finished sync the local copy is current: make sure the
     // PRIORITY HISTORY has a confirmed snapshot (first run after the upgrade).
+    // Then start or end any SCHEDULED priority list that is due (also every few seconds).
+    const due = () => void priority.applyDueSlots().catch((err: unknown) => console.error(err));
     let last = sync.getStatus().state;
     const off = sync.subscribe((s) => {
-      if (s.state === "idle" && last !== "idle") void priority.ensureConfirmedStart().catch((err: unknown) => console.error(err));
+      if (s.state === "idle" && last !== "idle") {
+        void priority
+          .ensureConfirmedStart()
+          .catch((err: unknown) => console.error(err))
+          .finally(due);
+      }
       last = s.state;
     });
+    due();
+    const tick = setInterval(due, 10_000);
     return () => {
       off();
+      clearInterval(tick);
       sync.stop();
     };
   }, [user, sync, priority]);

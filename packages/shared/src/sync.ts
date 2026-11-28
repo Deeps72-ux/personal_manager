@@ -15,6 +15,7 @@ import {
   IdSchema,
   LogEntrySchema,
   PlacementSchema,
+  PrioritySlotSchema,
   PrioritySnapshotSchema,
   RankSchema,
   TaskPatchSchema,
@@ -45,6 +46,11 @@ export const ChangeSchema = z.discriminatedUnion("op", [
   z.strictObject({ ...base, op: z.literal("moveTask"), taskId: IdSchema, rank: RankSchema }),
   /** A rank typed on a PRIORITY card (null = back to its position). */
   z.strictObject({ ...base, op: z.literal("setTaskRank"), taskId: IdSchema, userRank: PlacementSchema.shape.userRank.unwrap().nullable() }),
+  /** The card left (true) or rejoined (false) its ranked folder's group. */
+  z.strictObject({ ...base, op: z.literal("setTaskOwnRank"), taskId: IdSchema, ownRank: z.boolean() }),
+  /** Create or replace a SCHEDULED priority list (the whole row). */
+  z.strictObject({ ...base, op: z.literal("saveSlot"), slot: PrioritySlotSchema }),
+  z.strictObject({ ...base, op: z.literal("deleteSlot"), slotId: IdSchema }),
   /** Erase every rank typed on cards (a drag, queueing or new task did it). */
   z.strictObject({ ...base, op: z.literal("clearTaskRanks") }),
   /** A folder's PRIORITY rank, given to every task inside it (null = none). */
@@ -145,12 +151,14 @@ export const PullResponseSchema = z.strictObject({
     logEntries: z.array(LogEntrySchema),
     priorityHistory: z.array(PrioritySnapshotSchema),
     folders: z.array(FolderSchema),
+    prioritySlots: z.array(PrioritySlotSchema),
   }),
   deletes: z.strictObject({
     tasks: z.array(IdSchema),
     placements: z.array(IdSchema), // by taskId
     logEntries: z.array(IdSchema),
     folders: z.array(IdSchema),
+    prioritySlots: z.array(IdSchema),
   }),
 });
 export type PullResponse = z.infer<typeof PullResponseSchema>;

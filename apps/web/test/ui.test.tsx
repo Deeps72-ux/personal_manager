@@ -7,7 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { todayLocal, type Change, type PullResponse } from "@pm/shared";
 import { MemorySessionStore, MemoryStore } from "../src/adapters/memory-store.ts";
-import { FolderActions, LogActions, PriorityActions, TaskActions, TimerActions } from "../src/core/actions.ts";
+import { FolderActions, LogActions, PriorityActions, SlotActions, TaskActions, TimerActions } from "../src/core/actions.ts";
 import { AuthService, SessionHolder } from "../src/core/auth.ts";
 import { ExportLogs } from "../src/core/export-logs.ts";
 import type { RemoteApi } from "../src/core/ports.ts";
@@ -31,8 +31,8 @@ function fakeApi(): RemoteApi & { pushed: Change[] } {
     hasMore: false,
     purgedBefore: null,
     timerStart: null,
-    upserts: { tasks: [], placements: [], logEntries: [], priorityHistory: [], folders: [] },
-    deletes: { tasks: [], placements: [], logEntries: [], folders: [] },
+    upserts: { tasks: [], placements: [], logEntries: [], priorityHistory: [], folders: [], prioritySlots: [] },
+    deletes: { tasks: [], placements: [], logEntries: [], folders: [], prioritySlots: [] },
   };
   return {
     pushed,
@@ -53,6 +53,7 @@ function renderApp() {
   const api = fakeApi();
   const sync = new SyncEngine({ store, api, debounceMs: 5 });
   const saved: string[] = [];
+  const priority = new PriorityActions({ store, sync });
   const services: Services = {
     store,
     holder,
@@ -60,7 +61,8 @@ function renderApp() {
     auth: new AuthService({ api, sessions: new MemorySessionStore(), store, holder }),
     tasks: new TaskActions({ store, sync }),
     folders: new FolderActions({ store, sync }),
-    priority: new PriorityActions({ store, sync }),
+    priority,
+    slots: new SlotActions({ store, sync, priority }),
     logs: new LogActions({ store, sync }),
     timer: new TimerActions({ store, sync }),
     exporter: new ExportLogs({
@@ -236,6 +238,31 @@ describe("PWA UI", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("from 1 to 3");
     await user.click(screen.getByRole("button", { name: "Clear" }));
     await waitFor(() => expect(badges()).toEqual(["1. A", "2. B", "3. C"]));
+  });
+
+  it("PRIORITY: schedule a list for a future slot: leave a task out, save; overlaps are refused", async () => {
+    const { user, services } = renderApp();
+    await signUp(user);
+    for (const t of ["C", "B", "A"]) await services.tasks.create({ title: t });
+    await user.click(nav().getByRole("button", { name: /Priority/ }));
+    await user.click(await screen.findByRole("button", { name: "Scheduled priority lists" }));
+    let dialog = within(screen.getByRole("dialog", { name: "Scheduled priority lists" }));
+    expect(dialog.getByText("Nothing scheduled.")).toBeTruthy();
+    await user.click(dialog.getByRole("button", { name: /New scheduled list/ }));
+    dialog = within(screen.getByRole("dialog", { name: "Scheduled priority lists" }));
+    await user.click(dialog.getByRole("button", { name: "Leave B out" }));
+    expect(dialog.getByRole("button", { name: "Add B" })).toBeTruthy();
+    await user.click(dialog.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(dialog.queryByRole("button", { name: "Save" })).toBeNull());
+    const [slot] = await services.store.listSlots();
+    expect(slot!.list.entries.map((e) => `${e.title}${e.rank}`)).toEqual(["A1", "C2"]);
+    expect(slot!.startMs).toBeGreaterThan(Date.now());
+    expect(screen.getByText(/Next scheduled list/)).toBeTruthy();
+
+    // The same times again: refused, naming the clash.
+    await user.click(dialog.getByRole("button", { name: /New scheduled list/ }));
+    await user.click(dialog.getByRole("button", { name: "Save" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Overlaps the scheduled list/);
   });
 
   it("TASKS: new tasks and folders go to the very top, above older folders", async () => {

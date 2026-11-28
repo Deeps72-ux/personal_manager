@@ -2,7 +2,7 @@
  * In-memory LocalStore + SessionStore. Used by tests, and a living proof of
  * Liskov substitution: the same contract tests pass for this and for Dexie.
  */
-import type { Change, Day, Folder, LogEntry, Placement, PrioritySnapshot, Task } from "@pm/shared";
+import type { Change, Day, Folder, LogEntry, Placement, PrioritySlot, PrioritySnapshot, Task } from "@pm/shared";
 import type { LocalStore, LocalTx, Session, SessionStore } from "../core/ports.ts";
 
 interface Data {
@@ -11,6 +11,7 @@ interface Data {
   folders: Map<string, Folder>;
   logs: Map<string, LogEntry>;
   history: Map<string, PrioritySnapshot>;
+  slots: Map<string, PrioritySlot>;
   outbox: Change[];
   cursor: number;
   purgedBefore: Day | null;
@@ -24,6 +25,7 @@ const empty = (): Data => ({
   folders: new Map(),
   logs: new Map(),
   history: new Map(),
+  slots: new Map(),
   outbox: [],
   cursor: 0,
   purgedBefore: null,
@@ -37,6 +39,7 @@ const clone = (d: Data): Data => ({
   folders: new Map(d.folders),
   logs: new Map(d.logs),
   history: new Map(d.history),
+  slots: new Map(d.slots),
   outbox: [...d.outbox],
   cursor: d.cursor,
   purgedBefore: d.purgedBefore,
@@ -45,6 +48,8 @@ const clone = (d: Data): Data => ({
 });
 
 const byAtThenId = (a: PrioritySnapshot, b: PrioritySnapshot) => a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+const byStart = (a: PrioritySlot, b: PrioritySlot) => a.startMs - b.startMs || (a.id < b.id ? -1 : 1);
 
 const byDayThenId = (a: LogEntry, b: LogEntry) => (a.day === b.day ? (a.id < b.id ? -1 : 1) : a.day < b.day ? -1 : 1);
 
@@ -82,6 +87,9 @@ export class MemoryStore implements LocalStore {
   }
   async listHistory() {
     return [...this.data.history.values()].sort(byAtThenId);
+  }
+  async listSlots() {
+    return [...this.data.slots.values()].sort(byStart);
   }
   async listOutbox() {
     return [...this.data.outbox];
@@ -135,6 +143,10 @@ function txFor(d: Data): LocalTx {
     listLogsForDay: async (day) => [...d.logs.values()].filter((l) => l.day === day).sort(byDayThenId),
     putSnapshot: async (s) => void d.history.set(s.id, s),
     listHistory: async () => [...d.history.values()].sort(byAtThenId),
+    getSlot: async (id) => d.slots.get(id),
+    putSlot: async (s) => void d.slots.set(s.id, s),
+    deleteSlot: async (id) => void d.slots.delete(id),
+    listSlots: async () => [...d.slots.values()].sort(byStart),
     enqueue: async (c) => void d.outbox.push(c),
     listOutbox: async () => [...d.outbox],
     setCursor: async (c) => void (d.cursor = c),
@@ -152,6 +164,7 @@ function txFor(d: Data): LocalTx {
       d.folders.clear();
       d.logs.clear();
       d.history.clear();
+      d.slots.clear();
     },
   };
 }

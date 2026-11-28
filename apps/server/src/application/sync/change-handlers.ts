@@ -163,6 +163,30 @@ export const changeHandlers: ChangeHandlers = {
     return applied;
   },
 
+  async setTaskOwnRank(repos, { userId, nowMs }, { taskId, ownRank }) {
+    if (!(await repos.placements.get(userId, taskId))) return missingTask(repos, userId, taskId);
+    await repos.placements.setOwnRank(userId, taskId, ownRank);
+    await repos.changeLog.append(userId, "placements", taskId, "upsert", nowMs);
+    return applied;
+  },
+
+  async saveSlot(repos, { userId, nowMs }, { slot }) {
+    // Whole row, the last write wins. A slot deleted elsewhere stays deleted.
+    if (!(await repos.slots.get(userId, slot.id)) && (await repos.changeLog.wasDeleted(userId, "priority_slots", slot.id))) {
+      return ignored("deleted");
+    }
+    await repos.slots.put(userId, slot);
+    await repos.changeLog.append(userId, "priority_slots", slot.id, "upsert", nowMs);
+    return applied;
+  },
+
+  async deleteSlot(repos, { userId, nowMs }, { slotId }) {
+    if (!(await repos.slots.get(userId, slotId))) return ignored("notFound");
+    await repos.slots.delete(userId, slotId);
+    await repos.changeLog.append(userId, "priority_slots", slotId, "delete", nowMs);
+    return applied;
+  },
+
   async clearTaskRanks(repos, { userId, nowMs }) {
     for (const taskId of await repos.placements.clearUserRanks(userId)) {
       await repos.changeLog.append(userId, "placements", taskId, "upsert", nowMs);

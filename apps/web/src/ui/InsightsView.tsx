@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
-import { formatPercent, formatSeconds } from "@pm/shared";
+import { effectiveHistory, formatPercent, formatSeconds } from "@pm/shared";
 import {
   deviationPoints,
   focusPoints,
@@ -54,11 +54,13 @@ export function InsightsView() {
   const data =
     useLive(
       async (s) => {
-        const [entries, history, timerStart] = await Promise.all([
+        const [entries, raw, slots, timerStart] = await Promise.all([
           s.store.listLogsBetween(from, to),
           s.store.listHistory(),
+          s.store.listSlots(),
           s.store.timerStart(),
         ]);
+        const history = effectiveHistory(raw, slots);
         return { focus: focusPoints(entries, timerStart, Date.now()), deviation: deviationPoints(entries, history) };
       },
       [from, to],

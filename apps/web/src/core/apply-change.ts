@@ -41,6 +41,17 @@ export async function applyChangeLocally(tx: LocalTx, change: Change): Promise<v
       if (p) await tx.putPlacement({ ...p, userRank: change.userRank });
       return;
     }
+    case "setTaskOwnRank": {
+      const p = await tx.getPlacement(change.taskId);
+      if (p) await tx.putPlacement({ ...p, ownRank: change.ownRank });
+      return;
+    }
+    case "saveSlot":
+      await tx.putSlot(change.slot);
+      return;
+    case "deleteSlot":
+      await tx.deleteSlot(change.slotId);
+      return;
     case "clearTaskRanks":
       for (const p of await tx.listPlacements()) {
         if (p.userRank !== null && p.userRank !== undefined) await tx.putPlacement({ ...p, userRank: null });

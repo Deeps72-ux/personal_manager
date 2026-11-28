@@ -76,6 +76,10 @@ function setup() {
         .join(" "),
     id: async (title: string) => (await store.listTasks()).find((t) => t.title === title)!.id,
     ops: async () => (await store.listOutbox()).map((c) => c.op),
+    ownRank: async (title: string) => {
+      const id = (await store.listTasks()).find((t) => t.title === title)!.id;
+      return !!(await store.listPlacements()).find((p) => p.taskId === id)?.ownRank;
+    },
   };
   return app;
 }
@@ -112,7 +116,7 @@ describe("rank actions", () => {
     expect(await app.shown()).toBe("E1 A2 B3 C4 D5");
   });
 
-  it("folder ranks survive drags; reordering inside the group erases nothing; dragging out clears the folder's rank", async () => {
+  it("folder ranks survive drags; reordering inside the group erases nothing; a card dragged out leaves its group alone", async () => {
     const app = setup();
     const work = await app.folders.create("Work");
     for (const t of ["Z", "Y", "X"]) await app.tasks.create({ title: t });
@@ -133,10 +137,71 @@ describe("rank actions", () => {
     await app.priority.move(await app.id("Y"), 0);
     expect(await app.shown()).toBe("Y1 Z2 W23 W13 X5");
 
-    // W1 dragged out of its group: Work loses its rank; all positions.
+    // W1 dragged out of its group to the top: only W1 leaves; Work moves down a step (3 → 4).
     await app.priority.move(await app.id("W1"), 0);
     expect(await app.shown()).toBe("W11 Y2 Z3 W24 X5");
-    expect((await app.store.listFolders())[0]!.priority ?? null).toBeNull();
+    expect((await app.store.listFolders())[0]!.priority).toBe(4);
+    expect(await app.ownRank("W1")).toBe(true);
+
+    // Another drag: W1 keeps its place as its own rank.
+    await app.priority.move(await app.id("X"), 1);
+    expect(await app.shown()).toBe("W11 X2 Y3 Z4 W25");
+    expect((await app.store.listFolders())[0]!.priority).toBe(5);
+
+    // Dragged back next to W2: it rejoins Work.
+    await app.priority.move(await app.id("W1"), 4);
+    expect(await app.shown()).toBe("X1 Y2 Z3 W24 W14");
+    expect(await app.ownRank("W1")).toBe(false);
+  });
+
+  it("a card dropped above a folder's group beats it: the group and everything below move down a step", async () => {
+    const app = setup();
+    const a = await app.folders.create("A");
+    const b = await app.folders.create("B");
+    for (const t of ["X", "P"]) await app.tasks.create({ title: t });
+    await app.tasks.create({ title: "B1", folderId: b });
+    await app.tasks.create({ title: "A2", folderId: a });
+    await app.tasks.create({ title: "A1", folderId: a });
+    await app.folders.setPriority(a, 1);
+    await app.folders.setPriority(b, 3);
+    expect(await app.shown()).toBe("A11 A21 B13 P4 X5");
+
+    await app.priority.move(await app.id("X"), 0);
+    expect(await app.shown()).toBe("X1 A12 A22 B14 P5");
+    const rank = async (id: string) => (await app.store.listFolders()).find((f) => f.id === id)!.priority;
+    expect(await rank(a)).toBe(2);
+    expect(await rank(b)).toBe(4);
+    const last = await app.priority.confirm(5000);
+    expect(last).toBe(true);
+    expect((await app.store.listHistory()).at(-1)!.ranks).toEqual([1, 2, 2, 4, 5]);
+  });
+
+  it("dropped between two tied cards of a folder, a card shares their rank", async () => {
+    const app = setup();
+    const a = await app.folders.create("A");
+    for (const t of ["X", "P"]) await app.tasks.create({ title: t });
+    await app.tasks.create({ title: "A2", folderId: a });
+    await app.tasks.create({ title: "A1", folderId: a });
+    await app.folders.setPriority(a, 1);
+    expect(await app.shown()).toBe("A11 A21 P3 X4");
+    await app.priority.move(await app.id("X"), 1);
+    expect(await app.shown()).toBe("A11 A21 X1 P4");
+  });
+
+  it("a card of another ranked folder dropped on top leaves only itself; its folder keeps its group, a step lower", async () => {
+    const app = setup();
+    const a = await app.folders.create("A");
+    const b = await app.folders.create("B");
+    await app.tasks.create({ title: "B2", folderId: b });
+    await app.tasks.create({ title: "B1", folderId: b });
+    await app.tasks.create({ title: "A1", folderId: a });
+    await app.folders.setPriority(a, 1);
+    await app.folders.setPriority(b, 2);
+    expect(await app.shown()).toBe("A11 B12 B22");
+    await app.priority.move(await app.id("B2"), 0);
+    expect(await app.shown()).toBe("B21 A12 B13");
+    const rank = async (id: string) => (await app.store.listFolders()).find((f) => f.id === id)!.priority;
+    expect([await rank(a), await rank(b)]).toEqual([2, 3]);
   });
 
   it("confirm snapshots the ranks; a rank edit makes the order confirmable again", async () => {

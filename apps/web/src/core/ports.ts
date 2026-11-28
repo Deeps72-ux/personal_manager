@@ -10,6 +10,7 @@ import type {
   Folder,
   LogEntry,
   Placement,
+  PrioritySlot,
   PrioritySnapshot,
   PullResponse,
   PushResponse,
@@ -45,6 +46,12 @@ export interface LocalTx {
   /** PRIORITY HISTORY, oldest first. */
   listHistory(): Promise<PrioritySnapshot[]>;
 
+  getSlot(id: string): Promise<PrioritySlot | undefined>;
+  putSlot(slot: PrioritySlot): Promise<void>;
+  deleteSlot(id: string): Promise<void>;
+  /** SCHEDULED priority lists, by start. */
+  listSlots(): Promise<PrioritySlot[]>;
+
   /** Append to the outbox (changes not yet accepted by the server). */
   enqueue(change: Change): Promise<void>;
   listOutbox(): Promise<Change[]>;
@@ -52,7 +59,7 @@ export interface LocalTx {
   setCursor(cursor: number): Promise<void>;
   getPurgedBefore(): Promise<Day | null>;
   setPurgedBefore(day: Day | null): Promise<void>;
-  /** Remove all synced rows (tasks, placements, folders, logs, history). Outbox is kept. */
+  /** Remove all synced rows (tasks, placements, folders, logs, history, slots). Outbox is kept. */
   clearSynced(): Promise<void>;
 
   /**
@@ -77,6 +84,9 @@ export interface LocalStore {
   listLogsBetween(from: Day, to: Day): Promise<LogEntry[]>;
   /** PRIORITY HISTORY, oldest first. */
   listHistory(): Promise<PrioritySnapshot[]>;
+
+  /** SCHEDULED priority lists, by start. */
+  listSlots(): Promise<PrioritySlot[]>;
 
   listOutbox(): Promise<Change[]>;
   removeFromOutbox(changeIds: readonly string[]): Promise<void>;

@@ -115,6 +115,7 @@ export function topTitles(titles: readonly string[], ranks?: readonly number[] |
 }
 
 export interface PriorityAt {
+  id?: string;
   at: number;
   titles: readonly string[];
   ranks?: readonly number[] | null | undefined;
@@ -129,6 +130,64 @@ export interface PriorityAt {
  */
 export function scoringHistory<T extends PriorityAt>(history: readonly T[]): T[] {
   return history.filter((s) => s.confirmed === true).sort((a, b) => a.at - b.at);
+}
+
+/** What `effectiveHistory` needs of a SCHEDULED slot. */
+export interface SlotAt {
+  id: string;
+  startMs: number;
+  endMs: number;
+  list: { entries: readonly { title: string; rank: number }[] };
+}
+
+/**
+ * The confirmed orders in force over time, with SCHEDULED slots applied, as
+ * a list of confirmed snapshots (each one in force until the next):
+ *   - from a slot's start: its list (the snapshot a device confirmed with
+ *     the slot's id, else the list as scheduled), then any ✓ pressed during
+ *     the slot, for the rest of it;
+ *   - at its end: the order in force just before it started comes back (an
+ *     empty list, scoring nothing, if there was none). A ✓ pressed during a
+ *     slot never outlives it.
+ * Slots that overlap (made apart on two devices) end where the next starts.
+ */
+export function effectiveHistory(history: readonly PriorityAt[], slots: readonly SlotAt[]): PriorityAt[] {
+  const confirmed = scoringHistory(history);
+  if (slots.length === 0) return confirmed;
+  const sorted = [...slots].sort((a, b) => a.startMs - b.startMs || (a.id < b.id ? -1 : 1));
+  const spans = sorted
+    .map((s, k) => ({ slot: s, start: s.startMs, end: Math.min(s.endMs, sorted[k + 1]?.startMs ?? Infinity) }))
+    .filter((x) => x.end > x.start);
+  const ids = new Set(slots.map((s) => s.id));
+  const spanAt = (t: number) => spans.find((x) => x.start <= t && t < x.end);
+  const outside = confirmed.filter((s) => !(s.id && ids.has(s.id)) && !spanAt(s.at));
+  const events: { e: PriorityAt; order: number }[] = outside.map((e) => ({ e, order: 1 }));
+  for (const x of spans) {
+    const base = confirmed.find((s) => s.id === x.slot.id);
+    const list = base ?? {
+      titles: x.slot.list.entries.map((e) => e.title),
+      ranks: x.slot.list.entries.map((e) => e.rank),
+    };
+    events.push({ e: { id: x.slot.id, at: x.start, titles: list.titles, ranks: list.ranks ?? null, confirmed: true }, order: 1 });
+    for (const s of confirmed) {
+      if (s.id && ids.has(s.id)) continue;
+      if (spanAt(s.at) === x && s.at >= x.start) events.push({ e: s, order: 2 });
+    }
+    if (x.end === Infinity) continue;
+    const before = outside.filter((s) => s.at < x.start).at(-1);
+    events.push({
+      e: { at: x.end, titles: before?.titles ?? [], ranks: before?.ranks ?? null, confirmed: true },
+      order: 0,
+    });
+  }
+  return events.sort((a, b) => a.e.at - b.e.at || a.order - b.order).map((x) => x.e);
+}
+
+/** The order in force at `t` in an `effectiveHistory` (null: none, or an empty one). */
+export function inForceAt<T extends PriorityAt>(timeline: readonly T[], t: number): T | null {
+  let out: T | null = null;
+  for (const s of timeline) if (s.at <= t) out = s;
+  return out && out.titles.length > 0 ? out : null;
 }
 
 /** The latest confirmed snapshot, if any. */

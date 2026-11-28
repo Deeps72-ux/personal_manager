@@ -1,4 +1,4 @@
-import { isValidDay, type Day, type LogEntry } from "@pm/shared";
+import { effectiveHistory, isValidDay, type Day, type LogEntry } from "@pm/shared";
 import { ValidationError } from "./errors.ts";
 import { logSlices } from "./insights.ts";
 import type { FileSaver, LocalStore, SpreadsheetWriter } from "./ports.ts";
@@ -18,7 +18,7 @@ export class ExportLogs {
     if (!isValidDay(from) || !isValidDay(to)) throw new ValidationError("Pick both dates");
     if (from > to) throw new ValidationError("'From' must be on or before 'To'");
     const entries = await this.deps.store.listLogsBetween(from, to);
-    const history = await this.deps.store.listHistory();
+    const history = effectiveHistory(await this.deps.store.listHistory(), await this.deps.store.listSlots());
     const deviation = new Map<LogEntry, number | null>();
     const rows = entries.flatMap((e): LogEntry[] => {
       const slices = logSlices(e, history);

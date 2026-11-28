@@ -77,12 +77,16 @@ const EpochMs = z.int().min(0).max(2 ** 48 - 1);
  * queue is never part of the scoring order. Missing/null = not queued.
  * `userRank`: a rank the user typed on the card (ties allowed). Missing/null
  * = its position in the list. Erased by any drag, queueing or new task.
+ * `ownRank`: the card left its ranked folder's group (dragged out of it):
+ * its own rank (typed, else its position) wins over the folder's, until it
+ * is dragged back among that folder's cards. Missing/null = false.
  */
 export const PlacementSchema = z.strictObject({
   taskId: IdSchema,
   rank: RankSchema,
   queuedAt: EpochMs.nullish(),
   userRank: z.int().min(1).max(MAX_PRIORITY_RANK).nullish(),
+  ownRank: z.boolean().nullish(),
 });
 export type Placement = z.infer<typeof PlacementSchema>;
 
@@ -149,3 +153,42 @@ export const PrioritySnapshotSchema = z
   })
   .refine((s) => !s.ranks || s.ranks.length === s.titles.length, "ranks must match titles");
 export type PrioritySnapshot = z.infer<typeof PrioritySnapshotSchema>;
+
+/**
+ * One card of a list kept for later (a SCHEDULED slot, or the list to go
+ * back to when a slot ends). `folderId`: the folder whose rank the card
+ * carries (its group); null = the card's own rank.
+ */
+export const PlanEntrySchema = z.strictObject({
+  taskId: IdSchema,
+  title: Title,
+  rank: z.int().min(1).max(MAX_PRIORITY_RANK),
+  folderId: IdSchema.nullable(),
+});
+export type PlanEntry = z.infer<typeof PlanEntrySchema>;
+
+/** A list kept for later: its cards best first, and when it was taken (tasks made after it go on top). */
+export const PlanListSchema = z.strictObject({
+  savedAt: EpochMs,
+  entries: z.array(PlanEntrySchema).max(2000),
+});
+export type PlanList = z.infer<typeof PlanListSchema>;
+
+/**
+ * A SCHEDULED priority list: from `startMs` to `endMs` (future when made;
+ * slots never overlap) this list is the one in force. `list` is frozen when
+ * saved (folder ranks included). At the start, a device makes it the
+ * visible list and confirms it (a snapshot with the slot's id); `restore`
+ * is the visible list it replaced, put back at the end (`restored` = done).
+ */
+export const PrioritySlotSchema = z
+  .strictObject({
+    id: IdSchema,
+    startMs: EpochMs,
+    endMs: EpochMs,
+    list: PlanListSchema,
+    restore: PlanListSchema.nullish(),
+    restored: z.boolean().nullish(),
+  })
+  .refine((s) => s.endMs > s.startMs, "a slot must end after it starts");
+export type PrioritySlot = z.infer<typeof PrioritySlotSchema>;

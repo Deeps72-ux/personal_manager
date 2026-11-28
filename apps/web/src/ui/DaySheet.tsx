@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
-import { formatPercent, formatSeconds, hasTextAfterSeparator, LIMITS, ONE_ACTIVITY_ERROR, sumSeconds, type Day } from "@pm/shared";
+import { effectiveHistory, formatPercent, formatSeconds, hasTextAfterSeparator, LIMITS, ONE_ACTIVITY_ERROR, sumSeconds, type Day } from "@pm/shared";
 import { logSlices } from "../core/insights.ts";
 import { daySegments, openIndexAt, piecesToLog, TIMER_LABEL, type Segment } from "../core/split.ts";
 import { dayLayout, knownSpan } from "../core/timeline.ts";
-import { chipText, formatDayLong, pad2, pickOrder } from "../core/views.ts";
+import { chipText, filterPicks, formatDayLong, pad2, pastActivities, pickOrder } from "../core/views.ts";
 import { cardLook, useActivityHue } from "./colors.ts";
 import { ChevronLeft, XIcon } from "./icons.tsx";
 import { useLive, useServices } from "./services.tsx";
 import { FolderChip, useFolderName } from "./folder-chip.tsx";
 import { SplitBar } from "./SplitBar.tsx";
+import { PastActivityChips, useAllLogs } from "./past-activities.tsx";
 
 const clock = (t: number) => {
   const d = new Date(t);
@@ -32,7 +33,7 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
   const { logs } = useServices();
   const entries = useLive((s) => s.store.listLogsForDay(day), [day]);
   const timerStart = useLive((s) => s.store.timerStart(), []);
-  const history = useLive((s) => s.store.listHistory(), []);
+  const history = useLive(async (s) => effectiveHistory(await s.store.listHistory(), await s.store.listSlots()), []);
   const tasks = useLive(async (s) => pickOrder(await s.store.listTasks(), await s.store.listPlacements(), await s.store.listFolders()), []);
   const purgedBefore = useLive((s) => s.store.purgedBefore(), []);
   const folderName = useFolderName();
@@ -67,6 +68,12 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
   const picked = segs[sel]?.locked === null ? segs[sel] : undefined;
   const update = (next: Segment[], nextSel = sel) => bar && setBar({ ...bar, segs: next, sel: nextSel });
   const labeled = segs.filter((p) => p.locked === null && p.text.trim()).length;
+  const allLogs = useAllLogs();
+  // What is typed in the picked piece narrows the cards to tap.
+  const typed = picked?.text ?? "";
+  const shownTasks = filterPicks(tasks ?? [], typed, folderName);
+  const past = pastActivities(allLogs, tasks ?? [], typed).filter((t) => chipText(t) !== typed.trim());
+  const pickTitle = (title: string) => (picked ? setText(chipText(title)) : setError("Tap a piece of the bar first"));
 
   const setText = (v: string) => {
     if (!picked) return;
@@ -151,15 +158,19 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
             {!segs.some((p) => p.locked === null) && (
               <p className="dropzone-hint">No free time on this day: remove a log to make room</p>
             )}
-            {tasks && tasks.length > 0 && (
+            <PastActivityChips titles={past} onPick={pickTitle} />
+            {tasks && tasks.length > 0 && shownTasks.length === 0 && typed.trim() && (
+              <p className="hint pick-none">No matching tasks: it will be logged as you typed it.</p>
+            )}
+            {shownTasks.length > 0 && (
               <div className="palette" aria-label="Your tasks">
-                {tasks.map((t) => (
+                {shownTasks.map((t) => (
                   <button
                     key={t.id}
                     type="button"
                     className="chip-btn"
                     onPointerDown={(e) => e.preventDefault()}
-                    onClick={() => (picked ? setText(chipText(t.title)) : setError("Tap a piece of the bar first"))}
+                    onClick={() => pickTitle(t.title)}
                   >
                     <span className="chip" style={{ "--hue": cardLook(t.id).hue } as CSSProperties}>
                       <span className="chip-title">{t.title}</span>

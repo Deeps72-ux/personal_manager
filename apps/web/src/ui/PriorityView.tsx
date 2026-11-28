@@ -24,9 +24,11 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { latestConfirmed, type Task } from "@pm/shared";
+import { effectiveHistory, inForceAt, type Task } from "@pm/shared";
+import { slotLabel } from "../core/actions.ts";
 import { canConfirm, splitPriority, type QueuedTask, type RankedCard } from "../core/views.ts";
 import { CheckIcon, GripIcon, QueueIcon, XIcon } from "./icons.tsx";
+import { ScheduleView } from "./ScheduleView.tsx";
 import { formatWait, heat, useNow, type Heat } from "./queue-heat.ts";
 import { useLive, useServices } from "./services.tsx";
 import { TaskCard } from "./TaskCard.tsx";
@@ -68,7 +70,8 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
     }),
     [],
   );
-  const confirmed = useLive(async (s) => latestConfirmed(await s.store.listHistory()), []);
+  const timeline = useLive(async (s) => ({ history: effectiveHistory(await s.store.listHistory(), await s.store.listSlots()), slots: await s.store.listSlots() }), []);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   // Optimistic order while the drop is being written, so cards never jump back.
   const [optimistic, setOptimistic] = useState<string[] | null>(null);
@@ -77,6 +80,10 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
   const [editing, setEditing] = useState<string | null>(null);
   const now = useNow(1000);
   const folderName = useFolderName();
+  // The order scores use NOW: the last confirmed one, or a scheduled list during its slot.
+  const confirmed = timeline === undefined ? undefined : inForceAt(timeline.history, now);
+  const runningSlot = timeline?.slots.find((s) => s.startMs <= now && now < s.endMs);
+  const nextSlot = timeline?.slots.find((s) => s.startMs > now);
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
@@ -136,8 +143,16 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
             {ids.length > 0 && (
               <p className="hint">
                 Drag cards to reorder, or onto the queue to park them. On a phone, press and hold a card first. Tap a
-                card's # to give it a rank; cards can share one. Dragging erases ranks typed on cards.
+                card's # to give it a rank; cards can share one. A card dropped above a folder's cards goes ahead of
+                them; dropped between tied cards it shares their rank. Dragging erases ranks typed on cards.
               </p>
+            )}
+            {runningSlot ? (
+              <p className="hint slot-hint" role="status">
+                Scheduled list in force until {slotLabel(runningSlot).split("–")[1]}. Then the list from before comes back.
+              </p>
+            ) : (
+              nextSlot && <p className="hint slot-hint">Next scheduled list: {slotLabel(nextSlot)}</p>
             )}
             {pending && (
               <p className="hint confirm-hint" role="status">
@@ -147,6 +162,15 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
               </p>
             )}
           </div>
+          <button
+            type="button"
+            className={`schedule-btn ${runningSlot ? "running" : ""}`}
+            onClick={() => setScheduleOpen(true)}
+            aria-label="Scheduled priority lists"
+            title="Schedule a priority list for a future time"
+          >
+            <ClockIcon />
+          </button>
           <button
             type="button"
             className={`confirm-btn ${pending ? "pending" : ""}`}
@@ -188,6 +212,7 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
         </DragOverlay>
       </DndContext>
 
+      {scheduleOpen && <ScheduleView onClose={() => setScheduleOpen(false)} />}
       {queueOpen && <QueueModal queue={queue} now={now} onClose={() => setQueueOpen(false)} />}
       {editingCard && (
         <RankDialog
@@ -473,5 +498,14 @@ function Outlet({ armed }: { armed: boolean }) {
     <div ref={setNodeRef} className={`queue-outlet ${armed ? "armed" : ""} ${isOver ? "over" : ""}`}>
       {isOver ? "Release: back to the list as #1" : "↓ Pull out here (back to the list as #1)"}
     </div>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
   );
 }

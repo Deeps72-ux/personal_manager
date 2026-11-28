@@ -6,6 +6,7 @@ import { SqliteFolderRepository } from "./folder-repository.ts";
 import { SqliteLogRepository } from "./log-repository.ts";
 import { SqlitePriorityHistoryRepository } from "./priority-history-repository.ts";
 import { SqliteSessionRepository } from "./session-repository.ts";
+import { SqliteSlotRepository } from "./slot-repository.ts";
 import { SqlitePlacementRepository, SqliteTaskRepository } from "./task-repository.ts";
 import { SqliteUserRepository } from "./user-repository.ts";
 
@@ -30,6 +31,7 @@ export class SqliteUnitOfWork implements UnitOfWork {
       logs: new SqliteLogRepository(db),
       priorityHistory: new SqlitePriorityHistoryRepository(db),
       folders: new SqliteFolderRepository(db),
+      slots: new SqliteSlotRepository(db),
       changeLog: new SqliteChangeLogRepository(db),
     };
   }

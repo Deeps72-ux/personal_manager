@@ -9,12 +9,13 @@ import {
 } from "react";
 import { LIMITS, ONE_ACTIVITY_ERROR, hasTextAfterSeparator } from "@pm/shared";
 import { piecesToLog, singleSegment, type Segment } from "../core/split.ts";
-import { chipText, pad2, pickOrder } from "../core/views.ts";
+import { chipText, filterPicks, pad2, pastActivities, pickOrder } from "../core/views.ts";
 import { cardLook, useActivityHue } from "./colors.ts";
 import { CheckIcon, XIcon } from "./icons.tsx";
 import { SplitBar } from "./SplitBar.tsx";
 import { useLive, useServices } from "./services.tsx";
 import { FolderChip, useFolderName } from "./folder-chip.tsx";
+import { PastActivityChips, useAllLogs } from "./past-activities.tsx";
 import { clearLegacyTimerStart, formatElapsed, readLegacyTimerStart } from "./timer-store.ts";
 
 /** A finger lifting right after the opening touch may land on ✕ or a card: ignore it. */
@@ -67,6 +68,10 @@ export function TimerView() {
   const shown = open && start != null ? formatElapsed(openAt - start) : "";
   const value = split?.segs[split.sel]?.text ?? "";
   const canLog = !!split?.segs.some((p) => p.locked === null && p.text.trim());
+  const allLogs = useAllLogs();
+  // What is typed so far narrows the cards to tap (and suggests activities typed before).
+  const shownTasks = filterPicks(tasks ?? [], value, folderName);
+  const past = pastActivities(allLogs, tasks ?? [], value).filter((t) => chipText(t) !== value.trim());
 
   // Opened: the whole time as one piece, picked. Another device restarted
   // the timer meanwhile: start again from its new start.
@@ -237,9 +242,13 @@ export function TimerView() {
                 {error}
               </p>
             )}
-            {tasks && tasks.length > 0 && (
+            <PastActivityChips titles={past} onPick={pick} />
+            {tasks && tasks.length > 0 && shownTasks.length === 0 && value.trim() && (
+              <p className="hint pick-none">No matching tasks: it will be logged as you typed it.</p>
+            )}
+            {shownTasks.length > 0 && (
               <ul className="timer-tasks" aria-label="Tasks">
-                {tasks.map((t) => (
+                {shownTasks.map((t) => (
                   <li key={t.id}>
                     <button
                       type="button"

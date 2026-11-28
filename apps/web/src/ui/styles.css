@@ -1907,3 +1907,125 @@ textarea {
   font-weight: 800;
   color: var(--primary);
 }
+
+/* ───────────── TIMER / LOG: activities typed before ───────────── */
+.past-chips,
+.slot-left {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin: 0.5rem 0;
+}
+.past-chip {
+  padding: 0.25rem 0.7rem;
+  border-radius: 99px;
+  font-size: 0.85rem;
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  color: var(--text);
+  touch-action: manipulation;
+}
+.past-chip:hover {
+  border-color: var(--primary);
+}
+.pick-none {
+  margin: 0.5rem 0;
+}
+
+/* ───────────── PRIORITY: scheduled lists ───────────── */
+.schedule-btn {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--primary);
+  background: var(--surface);
+  border: 2px solid color-mix(in srgb, var(--primary) 40%, var(--border));
+}
+.schedule-btn.running {
+  color: var(--primary-ink);
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.slot-hint {
+  color: var(--primary);
+}
+.schedule-modal {
+  width: min(560px, 100%);
+}
+.slot-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.slot-row {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.6rem;
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.slot-row.past {
+  display: block;
+}
+.slot-when {
+  font-weight: 600;
+}
+.slot-badge {
+  font-size: 0.75rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 99px;
+  background: var(--primary);
+  color: var(--primary-ink);
+}
+.slot-top {
+  flex-basis: 100%;
+  font-size: 0.85rem;
+}
+.slot-past {
+  margin-top: 1rem;
+}
+.slot-past summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.slot-titles {
+  margin: 0.4rem 0 0;
+  padding-left: 1.2rem;
+  font-size: 0.9rem;
+}
+.slot-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.slot-times label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  flex: 1 1 8rem;
+}
+.slot-stack {
+  margin-top: 0.5rem;
+}
+.slot-rank input {
+  width: 4.5rem;
+}
+.slot-buttons {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}

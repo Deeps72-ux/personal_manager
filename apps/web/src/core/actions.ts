@@ -17,15 +17,21 @@ import {
   logSpan,
   parseActivity,
   parseSecondsInput,
+  effectiveHistory,
+  inForceAt,
   latestConfirmed,
   rankAt,
   rankForTop,
   splitByDay,
   uuidv7,
+  uuidv7Time,
   type Change,
   type Day,
   type LogEntry,
   type NewChange,
+  type PlanEntry,
+  type PlanList,
+  type PrioritySlot,
   type Task,
 } from "@pm/shared";
 import { applyChangeLocally } from "./apply-change.ts";
@@ -34,7 +40,18 @@ import { ValidationError } from "./errors.ts";
 import type { LocalStore, LocalTx, SyncTrigger } from "./ports.ts";
 import { piecesToLog, singleSegment, type LoggedPiece, type Segment } from "./split.ts";
 import { dayLayout, fitsInFree } from "./timeline.ts";
-import { canConfirm, isQueued, priorityOrder, rankedList, sortedRanks, visibleOrder, type RankedCard } from "./views.ts";
+import {
+  canConfirm,
+  closeUpRanks,
+  dropCard,
+  isQueued,
+  planEntries,
+  priorityOrder,
+  rankedList,
+  sortedRanks,
+  visibleOrder,
+  type RankedCard,
+} from "./views.ts";
 
 async function record(tx: LocalTx, c: NewChange): Promise<Change> {
   const change = { changeId: uuidv7(), ...c } as Change;
@@ -102,7 +119,8 @@ interface Deps {
 async function recordConfirmed(tx: LocalTx, now: number): Promise<boolean> {
   const { titles, ranks } = visibleOrder(await tx.listTasks(), await tx.listPlacements(), await tx.listFolders());
   const history = await tx.listHistory();
-  if (!canConfirm({ titles, ranks }, latestConfirmed(history))) return false;
+  // Against the order in force NOW (a scheduled slot's list, during it).
+  if (!canConfirm({ titles, ranks }, inForceAt(effectiveHistory(history, await tx.listSlots()), now))) return false;
   // Strictly after the latest snapshot, so two in the same millisecond keep their order.
   const last = history.at(-1);
   const at = last ? Math.max(now, last.at + 1) : now;
@@ -389,31 +407,29 @@ export class PriorityActions {
   }
 
   /**
-   * Drop `taskId` so it ends up at `toIndex` of the list as shown. Erases
-   * every rank typed on cards: positions become the new order. A card ranked
-   * by a folder, dropped among that folder's cards, only reorders them and
-   * erases nothing; dropped anywhere else, that folder loses its rank.
+   * Drop `taskId` so it ends up at `toIndex` of the list as shown (see
+   * `dropCard`). The dropped card beats what it was dropped above: a
+   * folder's group dropped under it moves down a step, and so does
+   * everything below (folder ranks included, in the TASKS tab too). Dropped
+   * inside a tied group it shares their rank. Dropped among its own folder's
+   * cards it only reorders them (or rejoins them, if it had left). A card
+   * dragged out of its folder's group leaves it alone: the folder keeps its
+   * rank. Ranks typed on cards are erased: positions become the new order.
    */
   async move(taskId: string, toIndex: number): Promise<void> {
     const moved = await this.deps.store.write(async (tx) => {
       const cards = await rankedIn(tx);
       const from = cards.findIndex((c) => c.task.id === taskId);
       if (from < 0) return false;
+      const drop = dropCard(cards, from, toIndex);
+      if (!drop) return false;
       const card = cards[from]!;
-      const to = Math.max(0, Math.min(Math.trunc(toIndex), cards.length - 1));
-      const list = cards.filter((c) => c !== card);
-      list.splice(to, 0, card);
-      if (card.source === "folder") {
-        const inGroup = (c: RankedCard) => c.source === "folder" && c.folderId === card.folderId;
-        const at = list.flatMap((c, i) => (inGroup(c) ? [i] : []));
-        const together = at.length > 1 ? at.at(-1)! - at[0]! === at.length - 1 : to === from;
-        if (together) return reorderGroup(tx, list.filter(inGroup));
-        await record(tx, { op: "setFolderPriority", folderId: card.folderId!, priority: null });
+      if (drop.mode === "group" && card.source === "folder" && cards.some((c) => c !== card && c.folderId === card.folderId)) {
+        // Among its own folder's cards: they swap their order keys, nothing else changes.
+        const group = drop.order.filter((c) => c.source === "folder" && c.folderId === card.folderId);
+        return reorderGroup(tx, group);
       }
-      await eraseCardRanks(
-        tx,
-        list.map((c) => c.task.id),
-      );
+      await writeList(tx, drop.order, drop.folderRanks);
       return true;
     });
     if (moved) this.deps.sync.requestSync();
@@ -486,6 +502,48 @@ export class PriorityActions {
   }
 
   /**
+   * SCHEDULED slots that started or ended (call after a sync and every few
+   * seconds). A slot that started: the visible list becomes its list and is
+   * confirmed from its start (a snapshot with the slot's id, so two devices
+   * doing it record one); the list it replaced is kept on the slot. A slot
+   * that ended: that list comes back (unless the next slot starts right
+   * away: then it is kept for the end of that one). A slot that ended
+   * before any device saw it start changes nothing (scores still use it).
+   */
+  async applyDueSlots(now = Date.now()): Promise<boolean> {
+    const done = await this.deps.store.write(async (tx) => {
+      const slots = await tx.listSlots();
+      if (slots.length === 0) return false;
+      const confirmedIds = new Set((await tx.listHistory()).map((h) => h.id));
+      let carried: PlanList | null = null;
+      let changed = false;
+      for (const [k, slot] of slots.entries()) {
+        if (slot.startMs > now) break;
+        const started = confirmedIds.has(slot.id);
+        const running = now < slot.endMs;
+        if (running && !started) {
+          const restore = carried ?? (await captureList(tx, now));
+          carried = null;
+          await applyList(tx, slot.list, now);
+          const { titles, ranks } = visibleOrder(await tx.listTasks(), await tx.listPlacements(), await tx.listFolders());
+          await record(tx, { op: "recordPriority", snapshot: { id: slot.id, at: slot.startMs, titles, ranks, confirmed: true } });
+          await record(tx, { op: "saveSlot", slot: { ...slot, restore, restored: false } });
+          changed = true;
+        } else if (!running && started && !slot.restored) {
+          const next = slots[k + 1];
+          if (next && next.startMs <= now && now < next.endMs && !confirmedIds.has(next.id)) carried = slot.restore ?? null;
+          else if (slot.restore) await applyList(tx, slot.restore, now);
+          await record(tx, { op: "saveSlot", slot: { ...slot, restored: true } });
+          changed = true;
+        }
+      }
+      return changed;
+    });
+    if (done) this.deps.sync.requestSync();
+    return done;
+  }
+
+  /**
    * Upgrade from the versions that snapshotted every change: when there is
    * legacy history but nothing confirmed yet, confirm today's visible list
    * once, so a confirmed snapshot is always in force from here on. Legacy
@@ -499,6 +557,186 @@ export class PriorityActions {
       return recordConfirmed(tx, now);
     });
     if (done) this.deps.sync.requestSync();
+  }
+}
+
+/**
+ * Make the visible list exactly `order` (top first, each card with the rank
+ * it should show): placement order, folder ranks (`folderRanks`), and for
+ * every other card its own rank (a card shown apart from its ranked folder
+ * gets `ownRank`; a rank that is not its position is typed on it).
+ */
+async function writeList(tx: LocalTx, order: readonly RankedCard[], folderRanks: ReadonlyMap<string, number>): Promise<void> {
+  await eraseCardRanks(
+    tx,
+    order.map((c) => c.task.id),
+  );
+  for (const [folderId, rank] of folderRanks) {
+    const f = await tx.getFolder(folderId);
+    if (f && (f.priority ?? null) !== rank) await record(tx, { op: "setFolderPriority", folderId, priority: rank });
+  }
+  const now = new Map((await rankedIn(tx)).map((c) => [c.task.id, c]));
+  for (const want of order) {
+    const p = await tx.getPlacement(want.task.id);
+    const have = now.get(want.task.id);
+    if (!p || !have) continue;
+    if (want.source === "folder" && want.folderId === have.homeFolderId) {
+      if (p.ownRank) await record(tx, { op: "setTaskOwnRank", taskId: p.taskId, ownRank: false });
+      continue;
+    }
+    const own = have.homeFolderId !== null;
+    if (own !== !!p.ownRank) await record(tx, { op: "setTaskOwnRank", taskId: p.taskId, ownRank: own });
+    if (want.rank !== have.position) await record(tx, { op: "setTaskRank", taskId: p.taskId, userRank: want.rank });
+  }
+}
+
+/**
+ * When a list is kept: `now`, or later than every task that exists (so only
+ * tasks made after it count as new, even in the same millisecond).
+ */
+async function savedAtFor(tx: LocalTx, now: number): Promise<number> {
+  return Math.max(now, ...(await tx.listTasks()).map((t) => uuidv7Time(t.id)));
+}
+
+/** The visible list as a list kept for later. */
+async function captureList(tx: LocalTx, now: number): Promise<PlanList> {
+  return { savedAt: await savedAtFor(tx, now), entries: planEntries(await rankedIn(tx)) };
+}
+
+/**
+ * Make a kept list the visible one: tasks deleted since are dropped (the
+ * ranks below close up), tasks made after it was kept go on top, its tasks
+ * waiting in the queue come out, and visible tasks not in it are queued.
+ */
+async function applyList(tx: LocalTx, list: PlanList, now: number): Promise<void> {
+  const tasks = await tx.listTasks();
+  const placements = new Map((await tx.listPlacements()).map((p) => [p.taskId, p]));
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const kept = list.entries.filter((e) => byId.has(e.taskId) && placements.has(e.taskId));
+  const inList = new Set(kept.map((e) => e.taskId));
+  const fresh = priorityOrder(tasks, [...placements.values()])
+    .filter((t) => !inList.has(t.id) && uuidv7Time(t.id) > list.savedAt)
+    .sort((a, b) => (a.id < b.id ? 1 : -1))
+    .map((t): PlanEntry => ({ taskId: t.id, title: t.title, rank: 1, folderId: null }));
+  const items = [...fresh, ...kept];
+  const ranked = closeUpRanks(items, new Set(items.slice(0, fresh.length)));
+  const ids = new Set(ranked.map((e) => e.taskId));
+
+  for (const e of ranked) {
+    const p = placements.get(e.taskId)!;
+    if (!isQueued(p)) continue;
+    const rank = await rankInVisible(tx, e.taskId, 0);
+    if (rank !== null) await record(tx, { op: "dequeueTask", taskId: e.taskId, rank });
+  }
+  for (const p of placements.values()) {
+    if (!isQueued(p) && !ids.has(p.taskId)) await record(tx, { op: "queueTask", taskId: p.taskId, queuedAt: now });
+  }
+  const folderRanks = new Map<string, number>();
+  for (const e of ranked) if (e.folderId && !folderRanks.has(e.folderId)) folderRanks.set(e.folderId, e.rank);
+  const order: RankedCard[] = ranked.map((e, i) => ({
+    task: byId.get(e.taskId)!,
+    rank: e.rank,
+    position: i + 1,
+    source: e.folderId ? "folder" : "card",
+    folderId: e.folderId,
+    homeFolderId: null,
+  }));
+  await writeList(tx, order, folderRanks);
+}
+
+const hhmmLocal = (t: number) => {
+  const d = new Date(t);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+/** "Thu 3 Dec 09:00–11:34" in the device's time zone. */
+export function slotLabel(s: { startMs: number; endMs: number }): string {
+  const d = new Date(s.startMs);
+  const day = d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  return `${day} ${hhmmLocal(s.startMs)}–${hhmmLocal(s.endMs)}`;
+}
+
+/** Shortest scheduled slot. */
+export const MIN_SLOT_MS = 60_000;
+
+export interface SlotInput {
+  /** Missing: a new slot. */
+  id?: string;
+  startMs: number;
+  endMs: number;
+  /** The list, best first. Ignored for a slot that already started (only its end can change). */
+  entries: readonly PlanEntry[];
+}
+
+/**
+ * SCHEDULED priority lists: from a future start to its end, a list is in
+ * force. Slots never overlap. A future slot can be changed or deleted; a
+ * running one can only end earlier or later; past ones are kept as they were.
+ */
+export class SlotActions {
+  private readonly deps: Deps & { priority: PriorityActions };
+  constructor(deps: Deps & { priority: PriorityActions }) {
+    this.deps = deps;
+  }
+
+  async save(input: SlotInput, now = Date.now()): Promise<PrioritySlot> {
+    const startMs = Math.trunc(input.startMs);
+    const endMs = Math.trunc(input.endMs);
+    const slot = await this.deps.store.write(async (tx) => {
+      const slots = await tx.listSlots();
+      const old = input.id ? slots.find((s) => s.id === input.id) : undefined;
+      if (input.id && !old) throw new ValidationError("That scheduled list was deleted");
+      const running = !!old && old.startMs <= now;
+      if (old && old.endMs <= now) throw new ValidationError("A past slot cannot be changed");
+      const start = running ? old.startMs : startMs;
+      if (!Number.isFinite(start) || !Number.isFinite(endMs)) throw new ValidationError("Pick a start and an end");
+      if (!running && start <= now) throw new ValidationError("The start must be in the future");
+      if (endMs <= now) throw new ValidationError("The end must be in the future");
+      if (endMs - start < MIN_SLOT_MS) throw new ValidationError("A slot must last at least a minute");
+      const clash = slots.find((s) => s.id !== input.id && s.startMs < endMs && start < s.endMs);
+      if (clash) throw new ValidationError(`Overlaps the scheduled list ${slotLabel(clash)}`);
+      let next: PrioritySlot;
+      if (running) next = { ...old, endMs };
+      else {
+        if (input.entries.length === 0) throw new ValidationError("Put at least one task in the list");
+        next = {
+          id: old?.id ?? uuidv7(now),
+          startMs: start,
+          endMs,
+          list: { savedAt: await savedAtFor(tx, now), entries: input.entries.map((e) => ({ ...e })) },
+        };
+      }
+      await record(tx, { op: "saveSlot", slot: next });
+      return next;
+    });
+    this.deps.sync.requestSync();
+    await this.deps.priority.applyDueSlots(now);
+    return slot;
+  }
+
+  /** Delete a slot that has not started yet. */
+  async remove(slotId: string, now = Date.now()): Promise<void> {
+    const done = await this.deps.store.write(async (tx) => {
+      const slot = await tx.getSlot(slotId);
+      if (!slot) return false;
+      if (slot.startMs <= now) throw new ValidationError("Only a slot that has not started can be deleted");
+      await record(tx, { op: "deleteSlot", slotId });
+      return true;
+    });
+    if (done) this.deps.sync.requestSync();
+  }
+
+  /** End the running slot now: the list from before it comes back. */
+  async endNow(slotId: string, now = Date.now()): Promise<void> {
+    const done = await this.deps.store.write(async (tx) => {
+      const slot = await tx.getSlot(slotId);
+      if (!slot || slot.startMs > now || slot.endMs <= now) return false;
+      await record(tx, { op: "saveSlot", slot: { ...slot, endMs: Math.max(now, slot.startMs + 1) } });
+      return true;
+    });
+    if (done) {
+      this.deps.sync.requestSync();
+      await this.deps.priority.applyDueSlots(now);
+    }
   }
 }
 
