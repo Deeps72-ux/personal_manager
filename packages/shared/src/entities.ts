@@ -192,3 +192,16 @@ export const PrioritySlotSchema = z
   })
   .refine((s) => s.endMs > s.startMs, "a slot must end after it starts");
 export type PrioritySlot = z.infer<typeof PrioritySlotSchema>;
+
+/**
+ * A past activity the user removed from the suggestion chips under the
+ * TIMER / LOG bar. Logs keep their names; only the chip is hidden. Matched
+ * by name ignoring case; a log of that name created after `hiddenAt`
+ * brings the chip back.
+ */
+export const HiddenActivitySchema = z.strictObject({
+  id: IdSchema,
+  name: Title,
+  hiddenAt: EpochMs,
+});
+export type HiddenActivity = z.infer<typeof HiddenActivitySchema>;

@@ -14,6 +14,7 @@ import type { RemoteApi } from "../src/core/ports.ts";
 import { SyncEngine } from "../src/core/sync-engine.ts";
 import { App } from "../src/ui/App.tsx";
 import { ServicesProvider, type Services } from "../src/ui/services.tsx";
+import { rankedList } from "../src/core/views.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -31,8 +32,8 @@ function fakeApi(): RemoteApi & { pushed: Change[] } {
     hasMore: false,
     purgedBefore: null,
     timerStart: null,
-    upserts: { tasks: [], placements: [], logEntries: [], priorityHistory: [], folders: [], prioritySlots: [] },
-    deletes: { tasks: [], placements: [], logEntries: [], folders: [], prioritySlots: [] },
+    upserts: { tasks: [], placements: [], logEntries: [], priorityHistory: [], folders: [], prioritySlots: [], hiddenActivities: [] },
+    deletes: { tasks: [], placements: [], logEntries: [], folders: [], prioritySlots: [], hiddenActivities: [] },
   };
   return {
     pushed,
@@ -263,6 +264,50 @@ describe("PWA UI", () => {
     await user.click(dialog.getByRole("button", { name: /New scheduled list/ }));
     await user.click(dialog.getByRole("button", { name: "Save" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/Overlaps the scheduled list/);
+  });
+
+  it("LOG → a day → Priority: each list in force with its time; open one to restore it (✓ still needed) or schedule it again", async () => {
+    const { user, services } = renderApp();
+    await signUp(user);
+    for (const t of ["C", "B", "A"]) await services.tasks.create({ title: t });
+    const day = todayLocal();
+    const [y, m, d] = day.split("-").map(Number) as [number, number, number];
+    const at = (h: number) => new Date(y, m - 1, d, h).getTime();
+    await services.priority.confirm(at(0) - 1000); // A B C since yesterday
+    const c = (await services.store.listTasks()).find((t) => t.title === "C")!;
+    await services.priority.move(c.id, 0);
+    await services.priority.confirm(Math.min(at(4), Date.now() - 1000)); // C A B
+
+    await user.click(nav().getByRole("button", { name: /Log/ }));
+    await user.click(await screen.findByRole("gridcell", { name: new RegExp(`^${day}`) }));
+    await user.click(screen.getByRole("tab", { name: "Priority" }));
+    const rows = within(await screen.findByRole("list", { name: "Priority lists" }));
+    const items = rows.getAllByRole("button");
+    expect(items.map((b) => b.querySelector(".prio-top")!.textContent)).toEqual(["#1 A · +2 more", "#1 C · +2 more"]);
+    expect(items[0]!.querySelector(".prio-time")!.textContent).toMatch(/^00:00–/);
+    expect(items[1]!.querySelector(".prio-time")!.textContent).toMatch(/– now$/);
+
+    await user.click(items[0]!);
+    let dialog = within(screen.getByRole("dialog", { name: "Priority list" }));
+    expect(dialog.getAllByRole("listitem").map((li) => li.textContent)).toEqual(["#1A", "#2B", "#3C"]);
+    await user.click(dialog.getByRole("button", { name: "Restore as current" }));
+    await user.click(dialog.getByRole("button", { name: "Restore" }));
+    await screen.findByText(/Restored as your current list/);
+    const history = (await services.store.listHistory()).length;
+    const shown = rankedList(await services.store.listTasks(), await services.store.listPlacements(), await services.store.listFolders());
+    expect(shown.map((x) => x.task.title)).toEqual(["A", "B", "C"]);
+    expect((await services.store.listHistory()).length).toBe(history);
+    await user.click(dialog.getByRole("button", { name: "Close" }));
+
+    // Schedule it again: the slot editor opens filled with that list.
+    await user.click(rows.getAllByRole("button")[1]!);
+    dialog = within(screen.getByRole("dialog", { name: "Priority list" }));
+    await user.click(dialog.getByRole("button", { name: "Schedule this list again" }));
+    const editor = within(screen.getByRole("dialog", { name: "Scheduled priority lists" }));
+    await user.click(editor.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Scheduled priority lists" })).toBeNull());
+    const [slot] = await services.store.listSlots();
+    expect(slot!.list.entries.map((e) => e.title)).toEqual(["C", "A", "B"]);
   });
 
   it("TASKS: new tasks and folders go to the very top, above older folders", async () => {

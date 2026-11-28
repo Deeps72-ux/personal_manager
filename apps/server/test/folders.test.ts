@@ -115,6 +115,7 @@ describe("migration 005", () => {
     // Bring a database up to version 4 by hand-running migrate, then roll back the folders step.
     migrate(db);
     db.exec("DROP TABLE folders");
+    db.exec("DROP TABLE hidden_activities");
     db.exec("DROP TABLE priority_slots");
     db.exec("ALTER TABLE placements DROP COLUMN own_rank");
     db.exec("ALTER TABLE placements DROP COLUMN user_rank");

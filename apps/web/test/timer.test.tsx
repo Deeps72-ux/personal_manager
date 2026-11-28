@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { todayLocal } from "@pm/shared";
+import { todayLocal, uuidv7 } from "@pm/shared";
 import { MemoryStore } from "../src/adapters/memory-store.ts";
 import { LogActions, TaskActions, TimerActions } from "../src/core/actions.ts";
 import { chipText } from "../src/core/views.ts";
@@ -231,6 +231,40 @@ describe("TimerView task cards", () => {
     expect(screen.getByText(/No matching tasks/)).toBeTruthy();
     fireEvent.change(bar()!, { target: { value: "" } });
     expect(within(screen.getByRole("list", { name: "Tasks" })).getAllByRole("button")).toHaveLength(4);
+  });
+
+  it("past-activity chips: ✕ hides one (Undo brings it back); Manage lists them all; logs keep their names", async () => {
+    const app = await openWithTasks(undefined, "Gym");
+    await act(() => app.store.write(async (tx) => {
+      for (const [title, h] of [["Lunch", 3], ["Lunch break", 2], ["Walk", 1]] as const) {
+        await tx.putLog({ id: uuidv7(T0 - h * 3_600_000), day: DAY0, seconds: 60, taskTitle: title, startMs: T0 - h * 3_600_000 });
+      }
+    }));
+    fireEvent.change(bar()!, { target: { value: "l" } });
+    const chips = () =>
+      [...document.querySelectorAll<HTMLElement>(".past-chip")].map((b) => b.textContent);
+    expect(chips()).toEqual(["Lunch break", "Lunch", "Walk"]);
+
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Remove Lunch from suggestions" })));
+    expect(chips()).toEqual(["Lunch break", "Walk"]);
+    expect(screen.getByText(/Lunch.*removed from suggestions/)).toBeTruthy();
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Undo" })));
+    expect(chips()).toEqual(["Lunch break", "Lunch", "Walk"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    const dialog = within(screen.getByRole("dialog", { name: "Manage suggestions" }));
+    const suggested = within(dialog.getByRole("list", { name: "Suggested" }));
+    expect(suggested.getAllByRole("checkbox")).toHaveLength(3);
+    fireEvent.click(suggested.getByRole("checkbox", { name: /^Walk/ }));
+    fireEvent.click(suggested.getByRole("checkbox", { name: /^Lunch break/ }));
+    await act(async () => void fireEvent.click(dialog.getByRole("button", { name: /Remove 2/ })));
+    const removed = within(dialog.getByRole("list", { name: "Removed" }));
+    expect(removed.getAllByRole("listitem").map((li) => li.querySelector(".suggest-title")!.textContent)).toEqual(["Walk", "Lunch break"]); // most recent first
+    await act(async () => void fireEvent.click(removed.getAllByRole("button", { name: "Bring back" })[1]!));
+    expect(within(dialog.getByRole("list", { name: "Removed" })).getAllByRole("listitem")).toHaveLength(1);
+    fireEvent.click(dialog.getByRole("button", { name: "Close" }));
+    expect(chips()).toEqual(["Lunch break", "Lunch"]); // Walk stays removed
+    expect((await app.store.listLogsForDay(DAY0)).map((l) => l.taskTitle).sort()).toEqual(["Lunch", "Lunch break", "Walk"]);
   });
 
   it("typing after the ';' is blocked with a message; the text stays as it was", async () => {

@@ -11,6 +11,7 @@ import type {
   LogEntry,
   Placement,
   PrioritySlot,
+  HiddenActivity,
   PrioritySnapshot,
   PullResponse,
   PushResponse,
@@ -52,6 +53,10 @@ export interface LocalTx {
   /** SCHEDULED priority lists, by start. */
   listSlots(): Promise<PrioritySlot[]>;
 
+  putHidden(h: HiddenActivity): Promise<void>;
+  deleteHidden(id: string): Promise<void>;
+  listHidden(): Promise<HiddenActivity[]>;
+
   /** Append to the outbox (changes not yet accepted by the server). */
   enqueue(change: Change): Promise<void>;
   listOutbox(): Promise<Change[]>;
@@ -59,7 +64,7 @@ export interface LocalTx {
   setCursor(cursor: number): Promise<void>;
   getPurgedBefore(): Promise<Day | null>;
   setPurgedBefore(day: Day | null): Promise<void>;
-  /** Remove all synced rows (tasks, placements, folders, logs, history, slots). Outbox is kept. */
+  /** Remove all synced rows (tasks, placements, folders, logs, history, slots, hidden). Outbox is kept. */
   clearSynced(): Promise<void>;
 
   /**
@@ -87,6 +92,9 @@ export interface LocalStore {
 
   /** SCHEDULED priority lists, by start. */
   listSlots(): Promise<PrioritySlot[]>;
+
+  /** Past activities hidden from the suggestion chips. */
+  listHidden(): Promise<HiddenActivity[]>;
 
   listOutbox(): Promise<Change[]>;
   removeFromOutbox(changeIds: readonly string[]): Promise<void>;

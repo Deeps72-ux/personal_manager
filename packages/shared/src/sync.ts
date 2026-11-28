@@ -12,6 +12,7 @@ import { z } from "zod";
 import {
   DaySchema,
   FolderSchema,
+  HiddenActivitySchema,
   IdSchema,
   LogEntrySchema,
   PlacementSchema,
@@ -51,6 +52,10 @@ export const ChangeSchema = z.discriminatedUnion("op", [
   /** Create or replace a SCHEDULED priority list (the whole row). */
   z.strictObject({ ...base, op: z.literal("saveSlot"), slot: PrioritySlotSchema }),
   z.strictObject({ ...base, op: z.literal("deleteSlot"), slotId: IdSchema }),
+  /** Hide a past activity from the suggestion chips (logs untouched). */
+  z.strictObject({ ...base, op: z.literal("hideActivity"), hidden: HiddenActivitySchema }),
+  /** Show it again. */
+  z.strictObject({ ...base, op: z.literal("unhideActivity"), hiddenId: IdSchema }),
   /** Erase every rank typed on cards (a drag, queueing or new task did it). */
   z.strictObject({ ...base, op: z.literal("clearTaskRanks") }),
   /** A folder's PRIORITY rank, given to every task inside it (null = none). */
@@ -152,6 +157,7 @@ export const PullResponseSchema = z.strictObject({
     priorityHistory: z.array(PrioritySnapshotSchema),
     folders: z.array(FolderSchema),
     prioritySlots: z.array(PrioritySlotSchema),
+    hiddenActivities: z.array(HiddenActivitySchema),
   }),
   deletes: z.strictObject({
     tasks: z.array(IdSchema),
@@ -159,6 +165,7 @@ export const PullResponseSchema = z.strictObject({
     logEntries: z.array(IdSchema),
     folders: z.array(IdSchema),
     prioritySlots: z.array(IdSchema),
+    hiddenActivities: z.array(IdSchema),
   }),
 });
 export type PullResponse = z.infer<typeof PullResponseSchema>;

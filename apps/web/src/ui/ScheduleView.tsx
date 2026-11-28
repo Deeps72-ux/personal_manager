@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   DndContext,
   KeyboardSensor,
@@ -8,16 +8,18 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { MAX_PRIORITY_RANK, type PrioritySlot, type Task } from "@pm/shared";
+import { MAX_PRIORITY_RANK, type PlanList, type PrioritySlot, type Task } from "@pm/shared";
 import { slotLabel } from "../core/actions.ts";
 import { dropCard, planEntries, rankedList, sortRanked, isQueued, priorityOrder, pad2, type RankedCard } from "../core/views.ts";
 import { GripIcon, XIcon } from "./icons.tsx";
 import { useLive, useServices } from "./services.tsx";
 import { TaskCard } from "./TaskCard.tsx";
 import { useFolderName } from "./folder-chip.tsx";
+import { useDragAutoScroll } from "./drag-autoscroll.ts";
 
 const toDateInput = (t: number) => {
   const d = new Date(t);
@@ -57,9 +59,15 @@ interface Draft {
  * SCHEDULED priority lists: plan the list for a future time. At its start it
  * becomes the visible list and is confirmed; at its end the list from before
  * comes back. Slots never overlap. A future slot can be changed or deleted, a
- * running one can end earlier or later, past ones are kept to look at.
+ * running one can end earlier or later. Past lists are in the LOG (a day's
+ * Priority view).
+ *
+ * `start`: open straight into the editor, for a new slot filled with a past
+ * list, or for one upcoming slot; closing the editor then closes the dialog.
  */
-export function ScheduleView({ onClose }: { onClose: () => void }) {
+export type ScheduleStart = { kind: "new"; list: PlanList } | { kind: "edit"; slotId: string };
+
+export function ScheduleView({ onClose, start }: { onClose: () => void; start?: ScheduleStart }) {
   const { slots: actions } = useServices();
   const data = useLive(
     async (s) => ({
@@ -74,9 +82,11 @@ export function ScheduleView({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const now = Date.now();
+  const closeDraft = () => (start ? onClose() : setDraft(null));
+  const started = useRef(false);
 
   useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => e.key === "Escape" && (draft ? setDraft(null) : onClose());
+    const onKey = (e: globalThis.KeyboardEvent) => e.key === "Escape" && (draft ? closeDraft() : onClose());
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, draft]);
@@ -90,16 +100,15 @@ export function ScheduleView({ onClose }: { onClose: () => void }) {
   const byId = new Map(data.tasks.map((t) => [t.id, t]));
   const homeOf = new Map(live.map((c) => [c.task.id, c.homeFolderId]));
   const upcoming = data.slots.filter((s) => s.endMs > now);
-  const past = data.slots.filter((s) => s.endMs <= now).reverse();
 
-  const startNew = () => {
-    const start = Math.ceil((now + 60_000) / 900_000) * 900_000; // the next quarter hour
+  const startNew = (cards: RankedCard[] = live) => {
+    const at = Math.ceil((now + 60_000) / 900_000) * 900_000; // the next quarter hour
     setError(null);
-    setDraft({ slot: null, date: toDateInput(start), from: toTimeInput(start), to: toTimeInput(start + 3_600_000), cards: live });
+    setDraft({ slot: null, date: toDateInput(at), from: toTimeInput(at), to: toTimeInput(at + 3_600_000), cards });
   };
-  const edit = (slot: PrioritySlot) => {
-    const cards = reposition(
-      slot.list.entries
+  const cardsOf = (list: PlanList) =>
+    reposition(
+      list.entries
         .filter((e) => byId.has(e.taskId))
         .map(
           (e, i): RankedCard => ({
@@ -112,16 +121,27 @@ export function ScheduleView({ onClose }: { onClose: () => void }) {
           }),
         ),
     );
+  const edit = (slot: PrioritySlot) => {
+    const cards = cardsOf(slot.list);
     setError(null);
     setDraft({ slot, date: toDateInput(slot.startMs), from: toTimeInput(slot.startMs), to: toTimeInput(slot.endMs), cards });
   };
+
+  if (start && !started.current) {
+    started.current = true;
+    const slot = start.kind === "edit" ? data.slots.find((s) => s.id === start.slotId) : undefined;
+    // Once, as soon as the data is here: open straight into the editor.
+    if (start.kind === "new") startNew(cardsOf(start.list));
+    else if (slot) edit(slot);
+    else startNew();
+  }
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
     setError(null);
     try {
       await fn();
-      setDraft(null);
+      closeDraft();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -145,7 +165,7 @@ export function ScheduleView({ onClose }: { onClose: () => void }) {
       <div className="modal schedule-modal" role="dialog" aria-modal="true" aria-label="Scheduled priority lists">
         <div className="modal-head">
           <h2>{draft ? (draft.slot ? "Scheduled list" : "New scheduled list") : "Scheduled lists"}</h2>
-          <button className="icon" aria-label="Close" onClick={draft ? () => setDraft(null) : onClose}>
+          <button className="icon" aria-label="Close" onClick={draft ? closeDraft : onClose}>
             <XIcon />
           </button>
         </div>
@@ -158,7 +178,7 @@ export function ScheduleView({ onClose }: { onClose: () => void }) {
             error={error}
             onChange={setDraft}
             onSave={save}
-            onCancel={() => setDraft(null)}
+            onCancel={closeDraft}
             onDelete={() => draft.slot && void run(() => actions.remove(draft.slot!.id))}
             onEndNow={() => draft.slot && void run(() => actions.endNow(draft.slot!.id))}
           />
@@ -166,9 +186,9 @@ export function ScheduleView({ onClose }: { onClose: () => void }) {
           <>
             <p className="hint">
               Plan your priority list for a future time. At its start it becomes your list and is confirmed; at its end
-              the list from before comes back. Times can't overlap.
+              the list from before comes back. Times can't overlap. Past lists are in Log: open a day, then Priority.
             </p>
-            <button type="button" className="primary small" onClick={startNew}>
+            <button type="button" className="primary small" onClick={() => startNew()}>
               ＋ New scheduled list
             </button>
             {upcoming.length === 0 ? (
@@ -188,27 +208,6 @@ export function ScheduleView({ onClose }: { onClose: () => void }) {
                   </li>
                 ))}
               </ul>
-            )}
-            {past.length > 0 && (
-              <details className="slot-past">
-                <summary>
-                  Past scheduled lists <span className="count">{past.length}</span>
-                </summary>
-                <ul className="slot-list">
-                  {past.map((s) => (
-                    <li key={s.id} className="slot-row past">
-                      <span className="slot-when">{slotLabel(s)}</span>
-                      <ol className="slot-titles">
-                        {s.list.entries.map((e) => (
-                          <li key={e.taskId}>
-                            #{e.rank} {e.title}
-                          </li>
-                        ))}
-                      </ol>
-                    </li>
-                  ))}
-                </ul>
-              </details>
             )}
           </>
         )}
@@ -253,7 +252,9 @@ function SlotEditor({
   const leftOut = allTasks.filter((t) => !inList.has(t.id));
   const set = (patch: Partial<Draft>) => onChange({ ...draft, ...patch });
 
+  const edgeScroll = useDragAutoScroll();
   const onDragEnd = (e: DragEndEvent) => {
+    edgeScroll.stop();
     const from = cards.findIndex((c) => c.task.id === String(e.active.id));
     const to = e.over ? cards.findIndex((c) => c.task.id === String(e.over!.id)) : -1;
     if (from < 0 || to < 0 || from === to) return;
@@ -310,7 +311,14 @@ function SlotEditor({
           ))}
         </ol>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          autoScroll={false}
+          onDragStart={(e: DragStartEvent) => edgeScroll.start(e.activatorEvent)}
+          onDragEnd={onDragEnd}
+          onDragCancel={edgeScroll.stop}
+        >
           <SortableContext items={cards.map((c) => c.task.id)} strategy={verticalListSortingStrategy}>
             <ol className="stack slot-stack">
               {cards.map((c, i) => (

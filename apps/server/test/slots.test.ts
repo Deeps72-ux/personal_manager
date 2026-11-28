@@ -52,3 +52,26 @@ describe("slot ops", () => {
     expect(res.results[0]!.status).toBe("ignored");
   });
 });
+
+describe("hidden activity ops", () => {
+  it("hideActivity / unhideActivity reach other devices; a late hide does not bring a removed one back", async () => {
+    const c = testContainer();
+    const { userId } = await newUser(c);
+    const cursor = (await c.useCases.pull.execute(userId, 0)).cursor;
+    const hidden = { id: uuidv7(), name: "Lunch", hiddenAt: 5000 };
+    await c.useCases.push.execute(userId, [ch({ op: "hideActivity", hidden })]);
+    const inc = await c.useCases.pull.execute(userId, cursor);
+    expect(inc.upserts.hiddenActivities).toEqual([hidden]);
+    expect((await c.useCases.pull.execute(userId, 0)).upserts.hiddenActivities).toEqual([hidden]);
+
+    const before = inc.cursor;
+    const res = await c.useCases.push.execute(userId, [
+      ch({ op: "unhideActivity", hiddenId: hidden.id }),
+      ch({ op: "unhideActivity", hiddenId: hidden.id }),
+      ch({ op: "hideActivity", hidden }),
+    ]);
+    expect(res.results.map((r) => r.status)).toEqual(["applied", "ignored", "ignored"]);
+    expect((await c.useCases.pull.execute(userId, before)).deletes.hiddenActivities).toEqual([hidden.id]);
+    expect((await c.useCases.pull.execute(userId, 0)).upserts.hiddenActivities).toEqual([]);
+  });
+});

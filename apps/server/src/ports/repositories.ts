@@ -6,7 +6,7 @@
  * ISOLATION RULE: every method that reads or writes user data takes `userId`
  * as its first argument. There is no way to call a repository "for all users".
  */
-import type { Day, Folder, LogEntry, Placement, PrioritySlot, PrioritySnapshot, Task, TaskPatch } from "@pm/shared";
+import type { Day, Folder, LogEntry, Placement, HiddenActivity, PrioritySlot, PrioritySnapshot, Task, TaskPatch } from "@pm/shared";
 
 export interface UserRecord {
   id: string;
@@ -106,8 +106,17 @@ export interface SlotRepository {
   delete(userId: string, id: string): Promise<void>;
 }
 
+/** Past activities hidden from the suggestion chips. */
+export interface HiddenActivityRepository {
+  get(userId: string, id: string): Promise<HiddenActivity | null>;
+  getMany(userId: string, ids: readonly string[]): Promise<HiddenActivity[]>;
+  listAll(userId: string): Promise<HiddenActivity[]>;
+  put(userId: string, hidden: HiddenActivity): Promise<void>;
+  delete(userId: string, id: string): Promise<void>;
+}
+
 /** "timer" rows only bump the cursor (row id = user id); the value travels in every pull. */
-export type SyncedTable = "tasks" | "placements" | "log_entries" | "priority_history" | "timer" | "folders" | "priority_slots";
+export type SyncedTable = "tasks" | "placements" | "log_entries" | "priority_history" | "timer" | "folders" | "priority_slots" | "hidden_activities";
 export type ChangeOpKind = "upsert" | "delete";
 
 export interface ChangeLogEntry {
@@ -141,5 +150,6 @@ export interface Repositories {
   priorityHistory: PriorityHistoryRepository;
   folders: FolderRepository;
   slots: SlotRepository;
+  hiddenActivities: HiddenActivityRepository;
   changeLog: ChangeLogRepository;
 }

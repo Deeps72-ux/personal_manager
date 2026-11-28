@@ -187,6 +187,22 @@ export const changeHandlers: ChangeHandlers = {
     return applied;
   },
 
+  async hideActivity(repos, { userId, nowMs }, { hidden }) {
+    if (!(await repos.hiddenActivities.get(userId, hidden.id)) && (await repos.changeLog.wasDeleted(userId, "hidden_activities", hidden.id))) {
+      return ignored("deleted");
+    }
+    await repos.hiddenActivities.put(userId, hidden);
+    await repos.changeLog.append(userId, "hidden_activities", hidden.id, "upsert", nowMs);
+    return applied;
+  },
+
+  async unhideActivity(repos, { userId, nowMs }, { hiddenId }) {
+    if (!(await repos.hiddenActivities.get(userId, hiddenId))) return ignored("notFound");
+    await repos.hiddenActivities.delete(userId, hiddenId);
+    await repos.changeLog.append(userId, "hidden_activities", hiddenId, "delete", nowMs);
+    return applied;
+  },
+
   async clearTaskRanks(repos, { userId, nowMs }) {
     for (const taskId of await repos.placements.clearUserRanks(userId)) {
       await repos.changeLog.append(userId, "placements", taskId, "upsert", nowMs);

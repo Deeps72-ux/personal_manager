@@ -6,8 +6,10 @@ import {
   compareRanked,
   daysInMonth,
   sumSeconds,
+  uuidv7Time,
   type Day,
   type Folder,
+  type HiddenActivity,
   type LogEntry,
   type PlanEntry,
   type Placement,
@@ -361,21 +363,74 @@ export function filterPicks(tasks: readonly Task[], text: string, folderName: (t
  * Activities logged before that are not tasks (e.g. "Lunch"), most recent
  * first, that contain what is typed. Nothing typed: none. At most `limit`.
  */
-export function pastActivities(entries: readonly LogEntry[], tasks: readonly Task[], text: string, limit = 8): string[] {
-  const q = activityKey(text);
-  if (!q) return [];
+/**
+ * Activities hidden from the chips (by name, ignoring case). A hidden name
+ * comes back once a log of it is created after it was hidden.
+ */
+export function hiddenKeys(entries: readonly LogEntry[], hidden: readonly HiddenActivity[]): Set<string> {
+  const at = new Map<string, number>();
+  for (const h of hidden) {
+    const k = activityKey(h.name);
+    at.set(k, Math.max(at.get(k) ?? 0, h.hiddenAt));
+  }
+  for (const e of entries) {
+    const k = activityKey(e.taskTitle);
+    const h = at.get(k);
+    if (h !== undefined && uuidv7Time(e.id) > h) at.delete(k);
+  }
+  return new Set(at.keys());
+}
+
+export interface ActivityStat {
+  key: string;
+  title: string;
+  count: number;
+  /** When it was last done (log start; older logs: creation). */
+  lastMs: number;
+  hidden: boolean;
+}
+
+/** Every activity logged before that is not a task, most recently used first. */
+export function activityStats(
+  entries: readonly LogEntry[],
+  tasks: readonly Task[],
+  hidden: readonly HiddenActivity[] = [],
+): ActivityStat[] {
   const taskKeys = new Set(tasks.map((t) => activityKey(t.title)));
-  const latest = new Map<string, { title: string; t: number }>();
+  const hiddenSet = hiddenKeys(entries, hidden);
+  const stats = new Map<string, ActivityStat>();
   for (const e of entries) {
     const key = activityKey(e.taskTitle);
-    if (taskKeys.has(key) || !key.includes(q)) continue;
-    const t = e.startMs ?? 0;
-    const cur = latest.get(key);
-    if (!cur || t > cur.t) latest.set(key, { title: e.taskTitle.trim(), t });
+    if (!key || taskKeys.has(key)) continue;
+    const t = e.startMs ?? uuidv7Time(e.id);
+    const cur = stats.get(key);
+    if (!cur) stats.set(key, { key, title: e.taskTitle.trim(), count: 1, lastMs: t, hidden: hiddenSet.has(key) });
+    else {
+      cur.count++;
+      if (t > cur.lastMs) Object.assign(cur, { lastMs: t, title: e.taskTitle.trim() });
+    }
   }
+  return [...stats.values()].sort((a, b) => b.lastMs - a.lastMs || (a.key < b.key ? -1 : 1));
+}
+
+/**
+ * Chips for the text typed so far: activities logged before that are not
+ * tasks and not hidden, those starting with the text first, then the most
+ * recent.
+ */
+export function pastActivities(
+  entries: readonly LogEntry[],
+  tasks: readonly Task[],
+  text: string,
+  limit = 8,
+  hidden: readonly HiddenActivity[] = [],
+): string[] {
+  const q = activityKey(text);
+  if (!q) return [];
   const starts = (s: string) => (s.toLocaleLowerCase().startsWith(q) ? 0 : 1);
-  return [...latest.values()]
-    .sort((a, b) => starts(a.title) - starts(b.title) || b.t - a.t)
+  return activityStats(entries, tasks, hidden)
+    .filter((a) => !a.hidden && a.key.includes(q))
+    .sort((a, b) => starts(a.title) - starts(b.title) || b.lastMs - a.lastMs)
     .slice(0, limit)
     .map((x) => x.title);
 }

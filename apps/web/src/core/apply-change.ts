@@ -52,6 +52,12 @@ export async function applyChangeLocally(tx: LocalTx, change: Change): Promise<v
     case "deleteSlot":
       await tx.deleteSlot(change.slotId);
       return;
+    case "hideActivity":
+      await tx.putHidden(change.hidden);
+      return;
+    case "unhideActivity":
+      await tx.deleteHidden(change.hiddenId);
+      return;
     case "clearTaskRanks":
       for (const p of await tx.listPlacements()) {
         if (p.userRank !== null && p.userRank !== undefined) await tx.putPlacement({ ...p, userRank: null });

@@ -2,7 +2,7 @@
  * In-memory LocalStore + SessionStore. Used by tests, and a living proof of
  * Liskov substitution: the same contract tests pass for this and for Dexie.
  */
-import type { Change, Day, Folder, LogEntry, Placement, PrioritySlot, PrioritySnapshot, Task } from "@pm/shared";
+import type { Change, Day, Folder, HiddenActivity, LogEntry, Placement, PrioritySlot, PrioritySnapshot, Task } from "@pm/shared";
 import type { LocalStore, LocalTx, Session, SessionStore } from "../core/ports.ts";
 
 interface Data {
@@ -12,6 +12,7 @@ interface Data {
   logs: Map<string, LogEntry>;
   history: Map<string, PrioritySnapshot>;
   slots: Map<string, PrioritySlot>;
+  hidden: Map<string, HiddenActivity>;
   outbox: Change[];
   cursor: number;
   purgedBefore: Day | null;
@@ -26,6 +27,7 @@ const empty = (): Data => ({
   logs: new Map(),
   history: new Map(),
   slots: new Map(),
+  hidden: new Map(),
   outbox: [],
   cursor: 0,
   purgedBefore: null,
@@ -40,6 +42,7 @@ const clone = (d: Data): Data => ({
   logs: new Map(d.logs),
   history: new Map(d.history),
   slots: new Map(d.slots),
+  hidden: new Map(d.hidden),
   outbox: [...d.outbox],
   cursor: d.cursor,
   purgedBefore: d.purgedBefore,
@@ -90,6 +93,9 @@ export class MemoryStore implements LocalStore {
   }
   async listSlots() {
     return [...this.data.slots.values()].sort(byStart);
+  }
+  async listHidden() {
+    return [...this.data.hidden.values()];
   }
   async listOutbox() {
     return [...this.data.outbox];
@@ -147,6 +153,9 @@ function txFor(d: Data): LocalTx {
     putSlot: async (s) => void d.slots.set(s.id, s),
     deleteSlot: async (id) => void d.slots.delete(id),
     listSlots: async () => [...d.slots.values()].sort(byStart),
+    putHidden: async (h) => void d.hidden.set(h.id, h),
+    deleteHidden: async (id) => void d.hidden.delete(id),
+    listHidden: async () => [...d.hidden.values()],
     enqueue: async (c) => void d.outbox.push(c),
     listOutbox: async () => [...d.outbox],
     setCursor: async (c) => void (d.cursor = c),
@@ -165,6 +174,7 @@ function txFor(d: Data): LocalTx {
       d.logs.clear();
       d.history.clear();
       d.slots.clear();
+      d.hidden.clear();
     },
   };
 }

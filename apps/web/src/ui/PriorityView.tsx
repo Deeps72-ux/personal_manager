@@ -33,6 +33,7 @@ import { formatWait, heat, useNow, type Heat } from "./queue-heat.ts";
 import { useLive, useServices } from "./services.tsx";
 import { TaskCard } from "./TaskCard.tsx";
 import { FolderChip, useFolderName } from "./folder-chip.tsx";
+import { useDragAutoScroll } from "./drag-autoscroll.ts";
 
 const QUEUE_ID = "waiting-queue";
 const EXIT_ID = "queue-exit";
@@ -92,6 +93,7 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  const edgeScroll = useDragAutoScroll();
   if (!data) return null;
   const { list: tasks, queue, ranked } = data;
   const byId = new Map(tasks.map((t) => [t.id, t]));
@@ -110,8 +112,12 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
       .finally(() => setConfirming(false));
   };
 
-  const onDragStart = (e: DragStartEvent) => setActiveId(String(e.active.id));
+  const onDragStart = (e: DragStartEvent) => {
+    setActiveId(String(e.active.id));
+    edgeScroll.start(e.activatorEvent);
+  };
   const onDragEnd = (e: DragEndEvent) => {
+    edgeScroll.stop();
     setActiveId(null);
     const id = String(e.active.id);
     if (e.over?.id === QUEUE_ID) {
@@ -131,9 +137,13 @@ export function PriorityView({ onGoToTasks }: { onGoToTasks: () => void }) {
       <DndContext
         sensors={sensors}
         collisionDetection={collision}
+        autoScroll={false}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
-        onDragCancel={() => setActiveId(null)}
+        onDragCancel={() => {
+          edgeScroll.stop();
+          setActiveId(null);
+        }}
       >
         <div className="view-head priority-head">
           <div className="priority-title">
@@ -407,7 +417,9 @@ function QueueModal({ queue, now, onClose }: { queue: readonly QueuedTask[]; now
   const bottom = shown[0];
   const pipeline = [...shown].reverse(); // newest first, oldest last (bottom)
 
+  const edgeScroll = useDragAutoScroll();
   const onDragEnd = (e: DragEndEvent) => {
+    edgeScroll.stop();
     setDragging(false);
     if (e.over?.id !== EXIT_ID || !bottom) return;
     const id = bottom.task.id;
@@ -435,9 +447,16 @@ function QueueModal({ queue, now, onClose }: { queue: readonly QueuedTask[]; now
               const hit = pointerWithin(a);
               return hit.length ? hit : rectIntersection(a); // keyboard drags have no pointer
             }}
-            onDragStart={() => setDragging(true)}
+            autoScroll={false}
+            onDragStart={(e: DragStartEvent) => {
+              setDragging(true);
+              edgeScroll.start(e.activatorEvent);
+            }}
             onDragEnd={onDragEnd}
-            onDragCancel={() => setDragging(false)}
+            onDragCancel={() => {
+              edgeScroll.stop();
+              setDragging(false);
+            }}
           >
             <p className="hint">
               In at the top, out at the bottom. Pull the bottom task down and out: it goes back to the top of your

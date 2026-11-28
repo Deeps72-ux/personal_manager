@@ -18,6 +18,7 @@ import { buildFolderTree, type Entry, type FolderId, type FolderTree } from "../
 import { FolderIcon, FolderPlusIcon, MoveIcon, PencilIcon, XIcon } from "./icons.tsx";
 import { useLive, useServices } from "./services.tsx";
 import { TaskCard } from "./TaskCard.tsx";
+import { useDragAutoScroll } from "./drag-autoscroll.ts";
 
 const FOLDER_KEY = "pm.tasks.folder";
 
@@ -457,7 +458,9 @@ function FolderBrowser({
     update(dropZone(tree, current, item, String(e.over.id), r.height > 0 ? (y - r.top) / r.height : 0.5));
   };
 
+  const edgeScroll = useDragAutoScroll();
   const end = () => {
+    edgeScroll.stop();
     setActive(null);
     update(null);
   };
@@ -467,7 +470,11 @@ function FolderBrowser({
       <DndContext
         sensors={sensors}
         collisionDetection={pointerWithin}
-        onDragStart={(e: DragStartEvent) => setActive(parseItem(String(e.active.id)))}
+        autoScroll={false}
+        onDragStart={(e: DragStartEvent) => {
+          setActive(parseItem(String(e.active.id)));
+          edgeScroll.start(e.activatorEvent);
+        }}
         onDragMove={onMove}
         onDragEnd={() => {
           const d = dropRef.current;

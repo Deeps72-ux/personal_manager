@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { User } from "@pm/shared";
 import { AuthScreen } from "./AuthScreen.tsx";
 import { ConflictBanner } from "./ConflictBanner.tsx";
@@ -73,6 +73,17 @@ export function App() {
 
 function Shell({ user }: { user: User }) {
   const [tab, setTab] = useState<string>(readTab);
+  const topbar = useRef<HTMLElement>(null);
+  // Sticky headers sit right under the top bar, whatever its real height.
+  useEffect(() => {
+    const el = topbar.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const set = () => document.documentElement.style.setProperty("--topbar-h", `${el.getBoundingClientRect().height}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const choose = (t: string) => {
     if (!FEATURE_LIST.some((f) => f.id === t)) return;
     setTab(t);
@@ -85,7 +96,7 @@ function Shell({ user }: { user: User }) {
 
   return (
     <div className="shell">
-      <header className="topbar">
+      <header className="topbar" ref={topbar}>
         <div className="brand">
           <img src="/favicon.svg" alt="" width={26} height={26} />
           <span>Personal Manager</span>

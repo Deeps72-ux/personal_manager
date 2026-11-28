@@ -1092,7 +1092,7 @@ textarea {
 /* ───────────── PRIORITY: waiting queue ───────────── */
 .priority-head {
   position: sticky;
-  top: calc(3.9rem + env(safe-area-inset-top));
+  top: var(--topbar-h, calc(3.9rem + env(safe-area-inset-top)));
   z-index: 5;
   display: flex;
   align-items: flex-start;
@@ -1100,6 +1100,17 @@ textarea {
   padding: 0.35rem 0 0.5rem;
   margin-bottom: 0.4rem;
   background: var(--bg);
+}
+/* Fill above the header up under the top bar: no card shows through a gap. */
+.priority-head::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 2rem;
+  background: var(--bg);
+  pointer-events: none;
 }
 .priority-title {
   flex: 1;
@@ -1929,6 +1940,127 @@ textarea {
 .past-chip:hover {
   border-color: var(--primary);
 }
+.past-chip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.past-chip-wrap .past-chip {
+  padding-right: 1.6rem;
+}
+.past-chip-x {
+  position: absolute;
+  right: 0.2rem;
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0;
+  display: none;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+}
+.past-chip-x svg {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+.past-chip-x:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+/* Mouse: the ✕ is always there. Touch: press and hold the chip to show it. */
+@media (hover: hover) and (pointer: fine) {
+  .past-chip-x {
+    display: grid;
+  }
+}
+.past-chip-wrap.armed .past-chip-x {
+  display: grid;
+  color: var(--danger);
+}
+.past-chip-wrap.armed .past-chip {
+  border-color: var(--danger);
+}
+@media not ((hover: hover) and (pointer: fine)) {
+  .past-chip-wrap:not(.armed) .past-chip {
+    padding-right: 0.7rem;
+  }
+}
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0.2rem 0.3rem;
+  color: var(--primary);
+  font-size: 0.85rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.undo-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: calc(100vw - 2rem);
+  padding: 0.55rem 0.9rem;
+  border-radius: 12px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.9rem;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.2);
+}
+.undo-toast .link-btn {
+  color: var(--bg);
+  font-weight: 700;
+}
+.suggest-modal .hint {
+  margin: 0 0 0.75rem;
+}
+.suggest-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+.suggest-all {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.suggest-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.suggest-list li {
+  border-bottom: 1px solid var(--border);
+}
+.suggest-list label,
+.suggest-list li.removed {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.1rem;
+}
+.suggest-title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.suggest-meta {
+  color: var(--muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.suggest-sub {
+  margin: 1.1rem 0 0.3rem;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
 .pick-none {
   margin: 0.5rem 0;
 }
@@ -1977,9 +2109,6 @@ textarea {
   border: 1px solid var(--border);
   color: var(--text);
 }
-.slot-row.past {
-  display: block;
-}
 .slot-when {
   font-weight: 600;
 }
@@ -1993,13 +2122,6 @@ textarea {
 .slot-top {
   flex-basis: 100%;
   font-size: 0.85rem;
-}
-.slot-past {
-  margin-top: 1rem;
-}
-.slot-past summary {
-  cursor: pointer;
-  color: var(--muted);
 }
 .slot-titles {
   margin: 0.4rem 0 0;
@@ -2028,4 +2150,159 @@ textarea {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 0.75rem;
+}
+
+/* ───────────── LOG day: Log | Priority, past priority lists ───────────── */
+.day-switch {
+  display: inline-flex;
+  gap: 0.2rem;
+  padding: 0.2rem;
+  margin-bottom: 1rem;
+  border-radius: 99px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.day-switch button {
+  padding: 0.35rem 1.1rem;
+  border: none;
+  border-radius: 99px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+}
+.day-switch button.active {
+  background: var(--surface);
+  color: var(--primary);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.12);
+}
+.prio-bar {
+  position: relative;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.prio-block {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding: 0;
+  border: none;
+  border-right: 2px solid var(--bg);
+  border-radius: 0;
+  background: hsl(var(--hue) var(--act-s) var(--act-l));
+}
+.prio-block.scheduled {
+  background: repeating-linear-gradient(
+    135deg,
+    hsl(var(--hue) var(--act-s) var(--act-l) / 0.55) 0 6px,
+    transparent 6px 11px
+  );
+  outline: 1.5px dashed hsl(var(--hue) var(--act-s) var(--act-l));
+  outline-offset: -2px;
+}
+.prio-now {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--text);
+  pointer-events: none;
+}
+.prio-ticks {
+  display: flex;
+  justify-content: space-between;
+  margin: 0.2rem 0 0.9rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.prio-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.prio-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.75rem;
+  align-items: start;
+  text-align: left;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+}
+.prio-row:hover {
+  border-color: var(--primary);
+}
+.prio-row.scheduled {
+  border-style: dashed;
+}
+.prio-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+.prio-main {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.prio-kind {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+.prio-top {
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.period-when {
+  margin: 0 0 0.6rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.period-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+.period-list li {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.4rem 0.6rem;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.period-list li.gone .period-title {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.period-rank {
+  min-width: 2.4rem;
+  font-weight: 700;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+.period-title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.period-gone {
+  font-size: 0.78rem;
+}
+.period-actions {
+  flex-wrap: wrap;
+}
+.period-ask p {
+  margin: 0 0 0.6rem;
 }

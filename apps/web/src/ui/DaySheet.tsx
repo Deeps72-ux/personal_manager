@@ -3,13 +3,14 @@ import { effectiveHistory, formatPercent, formatSeconds, hasTextAfterSeparator, 
 import { logSlices } from "../core/insights.ts";
 import { daySegments, openIndexAt, piecesToLog, TIMER_LABEL, type Segment } from "../core/split.ts";
 import { dayLayout, knownSpan } from "../core/timeline.ts";
-import { chipText, filterPicks, formatDayLong, pad2, pastActivities, pickOrder } from "../core/views.ts";
+import { chipText, filterPicks, formatDayLong, pad2, pickOrder } from "../core/views.ts";
 import { cardLook, useActivityHue } from "./colors.ts";
 import { ChevronLeft, XIcon } from "./icons.tsx";
 import { useLive, useServices } from "./services.tsx";
 import { FolderChip, useFolderName } from "./folder-chip.tsx";
 import { SplitBar } from "./SplitBar.tsx";
-import { PastActivityChips, useAllLogs } from "./past-activities.tsx";
+import { DayPriority } from "./DayPriority.tsx";
+import { PastActivitySuggestions } from "./past-activities.tsx";
 
 const clock = (t: number) => {
   const d = new Date(t);
@@ -28,6 +29,8 @@ const clock = (t: number) => {
  * Under it, every log is shown slice by slice, with its colour: a slice per
  * confirmed priority order in force while it ran, with that order's #1 task
  * and the slice's own deviation.
+ *
+ * A switch at the top shows the day's PRIORITY LISTS instead (DayPriority).
  */
 export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
   const { logs } = useServices();
@@ -39,6 +42,7 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
   const folderName = useFolderName();
   const hue = useActivityHue();
   const input = useRef<HTMLInputElement>(null);
+  const [view, setView] = useState<"log" | "priority">("log");
 
   const layout = useMemo(() => dayLayout(day, entries ?? [], timerStart ?? null), [day, entries, timerStart]);
   // The bar starts again whenever what is taken changes (a save, a sync).
@@ -68,11 +72,9 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
   const picked = segs[sel]?.locked === null ? segs[sel] : undefined;
   const update = (next: Segment[], nextSel = sel) => bar && setBar({ ...bar, segs: next, sel: nextSel });
   const labeled = segs.filter((p) => p.locked === null && p.text.trim()).length;
-  const allLogs = useAllLogs();
   // What is typed in the picked piece narrows the cards to tap.
   const typed = picked?.text ?? "";
   const shownTasks = filterPicks(tasks ?? [], typed, folderName);
-  const past = pastActivities(allLogs, tasks ?? [], typed).filter((t) => chipText(t) !== typed.trim());
   const pickTitle = (title: string) => (picked ? setText(chipText(title)) : setError("Tap a piece of the bar first"));
 
   const setText = (v: string) => {
@@ -115,6 +117,25 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
         </button>
         <h2>{formatDayLong(day)}</h2>
       </div>
+      <div className="day-switch" role="tablist" aria-label="Show">
+        <button type="button" role="tab" aria-selected={view === "log"} className={view === "log" ? "active" : ""} onClick={() => setView("log")}>
+          Log
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "priority"}
+          className={view === "priority" ? "active" : ""}
+          onClick={() => setView("priority")}
+        >
+          Priority
+        </button>
+      </div>
+
+      {view === "priority" ? (
+        <DayPriority day={day} />
+      ) : (
+        <>
 
       <div className="daymeter" aria-label={`${total} seconds logged, ${free} seconds free`}>
         <div className="daymeter-text">
@@ -158,7 +179,7 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
             {!segs.some((p) => p.locked === null) && (
               <p className="dropzone-hint">No free time on this day: remove a log to make room</p>
             )}
-            <PastActivityChips titles={past} onPick={pickTitle} />
+            <PastActivitySuggestions text={typed} tasks={tasks ?? []} onPick={pickTitle} />
             {tasks && tasks.length > 0 && shownTasks.length === 0 && typed.trim() && (
               <p className="hint pick-none">No matching tasks: it will be logged as you typed it.</p>
             )}
@@ -264,6 +285,8 @@ export function DaySheet({ day, onBack }: { day: Day; onBack: () => void }) {
           ];
         })}
       </ul>
+        </>
+      )}
     </section>
   );
 }

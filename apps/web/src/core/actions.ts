@@ -510,6 +510,16 @@ export class PriorityActions {
    * away: then it is kept for the end of that one). A slot that ended
    * before any device saw it start changes nothing (scores still use it).
    */
+  /**
+   * RESTORE a past list as the visible one (not confirmed: press ✓ to score
+   * it). Tasks deleted since drop out, tasks made after it go on top, its
+   * queued tasks come out of the queue and the others are queued.
+   */
+  async restoreList(list: PlanList, now = Date.now()): Promise<void> {
+    await this.deps.store.write((tx) => applyList(tx, list, now));
+    this.deps.sync.requestSync();
+  }
+
   async applyDueSlots(now = Date.now()): Promise<boolean> {
     const done = await this.deps.store.write(async (tx) => {
       const slots = await tx.listSlots();
@@ -844,6 +854,38 @@ export class LogActions {
   }
 
   /** Hard-delete every log entry dated before `day` (on all devices). */
+  /**
+   * Hide past activities from the suggestion chips (logs keep their names).
+   * Matched by name ignoring case; logging one again brings it back.
+   */
+  async hideActivities(names: readonly string[], now = Date.now()): Promise<void> {
+    const keys = [...new Set(names.map(activityKey).filter(Boolean))];
+    if (keys.length === 0) return;
+    await this.deps.store.write(async (tx) => {
+      const hidden = await tx.listHidden();
+      for (const name of names) {
+        const key = activityKey(name);
+        if (!keys.includes(key)) continue;
+        keys.splice(keys.indexOf(key), 1);
+        // A newer hide replaces an older one of the same name.
+        for (const h of hidden.filter((x) => activityKey(x.name) === key)) await record(tx, { op: "unhideActivity", hiddenId: h.id });
+        await record(tx, { op: "hideActivity", hidden: { id: uuidv7(now), name: name.trim().slice(0, LIMITS.titleMax), hiddenAt: now } });
+      }
+    });
+    this.deps.sync.requestSync();
+  }
+
+  /** Show hidden activities among the chips again. */
+  async unhideActivities(names: readonly string[]): Promise<void> {
+    const keys = new Set(names.map(activityKey));
+    await this.deps.store.write(async (tx) => {
+      for (const h of await tx.listHidden()) {
+        if (keys.has(activityKey(h.name))) await record(tx, { op: "unhideActivity", hiddenId: h.id });
+      }
+    });
+    this.deps.sync.requestSync();
+  }
+
   async purgeBefore(day: Day): Promise<void> {
     const before = DaySchema.safeParse(day);
     if (!before.success) throw new ValidationError("Pick a valid date");
